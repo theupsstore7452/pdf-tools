@@ -5,6 +5,10 @@ turns PDF pages into PNG or JPEG images, extracts selected pages as individual
 PDFs in a ZIP, merges PDFs, converts ordered PNG or JPEG images into a PDF, and
 imposes artwork onto print sheets.
 
+This repository continues the original
+[DaltonAlley/pdf-app](https://github.com/DaltonAlley/pdf-app) application, with
+releases and container images published under `theupsstore7452/pdf-tools`.
+
 The print-sheet workflow supports repeated or unique pages, simplex and duplex
 layouts, automatic placement, previews, reusable presets, and print-ready
 PDF exports.
@@ -63,9 +67,9 @@ quantity to every page or pair and closes the dialog.
 ## Quick start with Docker Compose
 
 Install Docker with the Compose plugin. Published images for Linux amd64 and
-arm64 are available at [GHCR](https://github.com/DaltonAlley/pdf-app/pkgs/container/pdf-tools).
+arm64 are available at [GHCR](https://github.com/theupsstore7452/pdf-tools/pkgs/container/pdf-tools).
 Download `compose.release.yml` and `SHA256SUMS` from a
-[GitHub release](https://github.com/DaltonAlley/pdf-app/releases) into an empty
+[GitHub release](https://github.com/theupsstore7452/pdf-tools/releases) into an empty
 deployment directory, then run:
 
 ```sh
@@ -77,10 +81,10 @@ No source checkout is required. Private packages require a registry login;
 an administrator can enable anonymous pulls by setting package visibility to
 Public. The
 release attachment pins that release's immutable image digest. If using the Compose file
-from the repository instead, `PDF_APP_VERSION` defaults to `0.2.12` and can be set
+from the repository instead, `PDF_APP_VERSION` defaults to `0.2.13` and can be set
 in `.env` to select another published version.
 
-To build locally instead, clone <https://github.com/DaltonAlley/pdf-app>, enter
+To build locally instead, clone <https://github.com/theupsstore7452/pdf-tools>, enter
 its repository root, and run:
 
 ```sh
@@ -163,7 +167,7 @@ manual dispatch. The tag must equal `v` plus the version in `Cargo.toml`; manual
 dispatch takes the exact version without `v` and builds its existing version
 tag, so a retry does not change the released source revision.
 Both paths build the existing Dockerfile for Linux amd64 and arm64, publish
-`ghcr.io/daltonalley/pdf-tools:<version>` using `GITHUB_TOKEN`, and smoke-test both
+`ghcr.io/theupsstore7452/pdf-tools:<version>` using `GITHUB_TOKEN`, and smoke-test both
 architectures by immutable image digest. Only after health and versioned frontend
 asset checks pass does the workflow create a GitHub release with a digest-pinned
 Compose file and `SHA256SUMS`. Images can exist even if a later smoke check fails.
