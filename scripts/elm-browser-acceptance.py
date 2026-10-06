@@ -701,8 +701,8 @@ class Suite:
         self.impose(stripe)
         viewports=[(1366,900),(1366,560),(1101,768),(1100,768),(1024,768),(881,700),(880,700),(800,900),(540,700),(539,700),(390,700),(320,568)]
         # CI's DejaVu fallback is wider than fonts installed on some desktops.
-        # Exercise it explicitly where an extra header row can collapse Setup.
-        cases=[(width,height,'') for width,height in viewports]+[(320,568,'DejaVu Sans, sans-serif')]
+        # Exercise it at every viewport for step labels and header wrapping.
+        cases=[(width,height,font) for font in ['', 'DejaVu Sans, sans-serif'] for width,height in viewports]
         for width,height,font in cases:
             self.page.evaluate('(font) => document.documentElement.style.fontFamily = font',font)
             suffix='-dejavu' if font else ''

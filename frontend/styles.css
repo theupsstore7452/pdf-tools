@@ -4196,7 +4196,7 @@ input[aria-invalid="true"] {
 .elm-shell .file-row { grid-template-columns:24px minmax(0,1fr) auto; align-items:center; }
 .elm-shell .file-row .file-meta { text-align:left; display:grid; gap:3px; }
 .elm-shell .file-row .file-row-actions { grid-column:3; }
-.elm-shell .setup-stepper ol { grid-template-columns:.7fr 1.5fr 1.3fr .7fr; gap:2px; }
+.elm-shell .setup-stepper ol { grid-template-columns:.6fr 1.4fr 1.6fr .7fr; gap:2px; }
 .elm-shell .setup-stepper button { padding:6px 3px; font-size:12px; overflow-wrap:normal; word-break:normal; }
 .elm-shell .setup-step-label { font-size:13px; overflow-wrap:normal; word-break:normal; hyphens:none; }
 .elm-shell .elm-setup fieldset { min-width:0; border:0; margin:0; padding:0; }
@@ -4218,6 +4218,5 @@ input[aria-invalid="true"] {
  /* Keep the theme switch beside the brand so font differences cannot wrap
     it onto another action row and consume the short screen's setup space. */
  .elm-shell .app-header-actions .theme-toggle { position:absolute; top:4px; right:8px; }
- .elm-shell .setup-stepper ol { grid-template-columns:.6fr 1.4fr 1.6fr .7fr; }
  .elm-shell .setup-step-label { font-size:12px; }
 }
