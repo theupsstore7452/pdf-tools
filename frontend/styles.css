@@ -4218,5 +4218,6 @@ input[aria-invalid="true"] {
  /* Keep the theme switch beside the brand so font differences cannot wrap
     it onto another action row and consume the short screen's setup space. */
  .elm-shell .app-header-actions .theme-toggle { position:absolute; top:4px; right:8px; }
+ .elm-shell .setup-stepper ol { grid-template-columns:.6fr 1.4fr 1.6fr .7fr; }
  .elm-shell .setup-step-label { font-size:12px; }
 }
