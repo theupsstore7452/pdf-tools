@@ -700,7 +700,12 @@ class Suite:
         self.fresh()
         self.impose(stripe)
         viewports=[(1366,900),(1366,560),(1101,768),(1100,768),(1024,768),(881,700),(880,700),(800,900),(540,700),(539,700),(390,700),(320,568)]
-        for width,height in viewports:
+        # CI's DejaVu fallback is wider than fonts installed on some desktops.
+        # Exercise it explicitly where an extra header row can collapse Setup.
+        cases=[(width,height,'') for width,height in viewports]+[(320,568,'DejaVu Sans, sans-serif')]
+        for width,height,font in cases:
+            self.page.evaluate('(font) => document.documentElement.style.fontFamily = font',font)
+            suffix='-dejavu' if font else ''
             self.page.set_viewport_size({'width':width,'height':height})
             self.page.wait_for_timeout(80)
             if width<=1100:
@@ -723,7 +728,7 @@ class Suite:
             dimension.scroll_into_view_if_needed()
             bounds=dimension.bounding_box()
             assert bounds['y']>=0 and bounds['y']+bounds['height']<=height,(width,height,bounds)
-            self.page.screenshot(path=str(self.out/f'setup-{width}x{height}.png'))
+            self.page.screenshot(path=str(self.out/f'setup-{width}x{height}{suffix}.png'))
             menu=self.artwork()
             menu.get_by_role('button',name='Fill',exact=True).click()
             self.idle()
@@ -731,7 +736,7 @@ class Suite:
             editor.scroll_into_view_if_needed()
             panel=menu.locator('fieldset').bounding_box()
             assert panel['x']>=-1 and panel['x']+panel['width']<=width+1 and panel['y']+panel['height']<=height+1,(width,height,panel)
-            self.page.screenshot(path=str(self.out/f'artwork-{width}x{height}.png'))
+            self.page.screenshot(path=str(self.out/f'artwork-{width}x{height}{suffix}.png'))
             menu.get_by_role('button',name='Fit',exact=True).click()
             self.idle()
             self.close_artwork()
@@ -741,7 +746,7 @@ class Suite:
             expect(sheet).to_be_visible()
             box=sheet.bounding_box()
             assert box['width']>80 and box['height']>80,(width,height,box)
-            self.page.screenshot(path=str(self.out/f'impose-{width}x{height}.png'))
+            self.page.screenshot(path=str(self.out/f'impose-{width}x{height}{suffix}.png'))
         self.page.set_viewport_size({'width':390,'height':700})
         self.switch('Images to PDF')
         expect(self.button('Create PDF')).to_be_visible()

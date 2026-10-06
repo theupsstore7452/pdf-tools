@@ -4214,5 +4214,9 @@ input[aria-invalid="true"] {
  .elm-shell .elm-toolbar details > summary { min-height:32px; padding:4px; }
 }
 @media (max-width:360px) {
+ .elm-shell .app-header { position:relative; }
+ /* Keep the theme switch beside the brand so font differences cannot wrap
+    it onto another action row and consume the short screen's setup space. */
+ .elm-shell .app-header-actions .theme-toggle { position:absolute; top:4px; right:8px; }
  .elm-shell .setup-step-label { font-size:12px; }
 }
