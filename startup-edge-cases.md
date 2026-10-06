@@ -1,5 +1,8 @@
 # Startup edge-case audit
 
+Historical acceptance record for the former Leptos frontend. For the current
+Elm frontend, see [Elm migration acceptance](elm-migration-acceptance.md).
+
 Agent-browser checks on 2026-09-04 found a stylesheet-loading defect in PR 7.
 A three-second CSS response delayed the startup indicator until 3,047 ms in
 two runs, immediately before the interface appeared. The blocking stylesheet

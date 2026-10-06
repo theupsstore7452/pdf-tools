@@ -16,5 +16,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
       - name: Check PDF App
-        shell: nix shell github:NixOS/nixpkgs/9fbb54b33e91ee4ca368e35a78e0613c720600b3#nushell -c nu --no-config-file {0}
-        run: nix develop .#pdf-app -c nu --no-config-file scripts/check.nu pdf-app
+        shell: bash
+        run: nix develop .#pdf-app -c scripts/check.sh
+
+      - name: Browser acceptance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elm-browser-acceptance
+          path: /tmp/pdf-elm-acceptance

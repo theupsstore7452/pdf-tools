@@ -1,5 +1,5 @@
 {
-  description = "UPS Store application development environments";
+  description = "PDF Tools development environment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -20,11 +20,6 @@
 
       rust197 = pkgs.rust-bin.stable."1.97.1".default.override {
         extensions = [ "clippy" "rustfmt" ];
-        targets = [ "wasm32-unknown-unknown" ];
-      };
-      rust193 = pkgs.rust-bin.stable."1.93.1".default.override {
-        extensions = [ "clippy" "rust-analyzer" "rustfmt" ];
-        targets = [ "wasm32-unknown-unknown" ];
       };
 
       pinnedNu = pkgs.stdenvNoCC.mkDerivation {
@@ -51,32 +46,6 @@
           stripRoot = false;
         };
       });
-
-      pinnedWasmBindgen = pkgs.buildWasmBindgenCli rec {
-        src = pkgs.fetchCrate {
-          pname = "wasm-bindgen-cli";
-          version = "0.2.127";
-          hash = "sha256-di+qBAdd7pENLiIB9CoZoab+W5xeDoByMREcCGTSzWo=";
-        };
-        cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
-          inherit src;
-          inherit (src) pname version;
-          hash = "sha256-FTv2GZIAQs0ePdIZXIXil7JbZ6kIT05VG6vqC1qNFxQ=";
-        };
-      };
-
-      pinnedPrintManagerWasmBindgen = pkgs.buildWasmBindgenCli rec {
-        src = pkgs.fetchCrate {
-          pname = "wasm-bindgen-cli";
-          version = "0.2.108";
-          hash = "sha256-UsuxILm1G6PkmVw0I/JF12CRltAfCJQFOaT4hFwvR8E=";
-        };
-        cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
-          inherit src;
-          inherit (src) pname version;
-          hash = "sha256-iqQiWbsKlLBiJFeqIYiXo3cqxGLSjNM8SOWXGM9u43E=";
-        };
-      };
 
       pinnedNextest = pkgs.rustPlatform.buildRustPackage {
         pname = "cargo-nextest";
@@ -116,10 +85,6 @@
           'is_extension = false' \
           '[[components]]' \
           'pkg = "rust-std"' \
-          'target = "wasm32-unknown-unknown"' \
-          'is_extension = false' \
-          '[[components]]' \
-          'pkg = "rust-std"' \
           'target = "x86_64-unknown-linux-gnu"' \
           'is_extension = false' \
           '[[components]]' \
@@ -153,8 +118,9 @@
         default = mkShell (with pkgs; [ just podman skopeo ]);
 
         pdf-app = (mkShell ([ pkgs.rustup rust197 ] ++ (with pkgs; [
-          binaryen
-          cargo-leptos
+          nodejs
+          (python3.withPackages (ps: [ ps.playwright ps.pymupdf ps.pillow ]))
+          playwright-driver.browsers
           clang
           chromium
           curl
@@ -164,7 +130,8 @@
           just
           pkg-config
           util-linux
-        ]) ++ [ pinnedNextest pinnedPdfium pinnedWasmBindgen ])).overrideAttrs (_: {
+        ]) ++ [ pinnedNextest pinnedPdfium ])).overrideAttrs (_: {
+          PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
           PDF_TOOLS_PDFIUM_PATH = "${pinnedPdfium}/lib/libpdfium.so";
           AGENT_BROWSER_EXECUTABLE_PATH = "${pkgs.chromium}/bin/chromium";
           # Bare CI containers have no system fonts; Chromium otherwise crashes
@@ -176,16 +143,6 @@
           RUSTUP_TOOLCHAIN = "1.97.1-x86_64-unknown-linux-gnu";
         });
 
-        print-manager = (mkShell ([ rust193 ] ++ (with pkgs; [
-          cargo-leptos
-          chromium
-          just
-          pkg-config
-        ]) ++ [ pinnedNextest pinnedPrintManagerWasmBindgen ])).overrideAttrs (_: {
-          AGENT_BROWSER_EXECUTABLE_PATH = "${pkgs.chromium}/bin/chromium";
-        });
-
-        auto-door = mkShell ([ rust193 pinnedNextest ] ++ (with pkgs; [ just ]));
       };
 
       checks.${system} = {
@@ -194,14 +151,12 @@
             pinnedNu
             pinnedNextest
             pkgs.agent-browser
-            pkgs.cargo-leptos
             pkgs.just
           ];
         } ''
           test "$(nu --no-config-file --version)" = 0.112.2
           test "$(cargo-nextest --version | head -n 1)" = "cargo-nextest 0.9.100"
           test "$(agent-browser --version)" = "agent-browser 0.27.0"
-          test "$(cargo-leptos --version)" = "cargo-leptos 0.3.7"
           test "$(just --version)" = "just 1.58.0"
           touch "$out"
         '';
@@ -210,15 +165,6 @@
           nativeBuildInputs = [ rust197 ];
         } ''
           test "$(rustc --version | cut -d ' ' -f 2)" = 1.97.1
-          test -d "$(rustc --print sysroot)/lib/rustlib/wasm32-unknown-unknown"
-          touch "$out"
-        '';
-
-        rust-1_93 = pkgs.runCommand "ups-store-rust-1.93.1" {
-          nativeBuildInputs = [ rust193 ];
-        } ''
-          test "$(rustc --version | cut -d ' ' -f 2)" = 1.93.1
-          test -d "$(rustc --print sysroot)/lib/rustlib/wasm32-unknown-unknown"
           touch "$out"
         '';
 
@@ -228,7 +174,7 @@
           RUSTUP_TOOLCHAIN = "1.97.1-x86_64-unknown-linux-gnu";
         } ''
           test "$(cargo +1.97.1 --version | cut -d ' ' -f 2)" = 1.97.1
-          rustup target list --installed | grep -Fx wasm32-unknown-unknown
+          rustup target list --installed | grep -Fx x86_64-unknown-linux-gnu
           touch "$out"
         '';
       };

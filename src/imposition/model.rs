@@ -206,7 +206,7 @@ pub(crate) struct ProductionWarning {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-enum ProductionWarningKind {
+pub(crate) enum ProductionWarningKind {
     #[default]
     General,
 }

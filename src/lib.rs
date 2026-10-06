@@ -26,3 +26,6 @@ pub(crate) const MAX_SOURCE_PDF_PAGES: usize = 1_000;
 
 #[cfg(test)]
 pub(crate) use adapters::test_pdfium;
+
+#[cfg(feature = "elm-codegen")]
+pub mod elm;

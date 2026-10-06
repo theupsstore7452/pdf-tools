@@ -1,6 +1,6 @@
 # PDF Tools
 
-PDF Tools is a self-hosted web app with a Rust backend and Leptos CSR frontend. It
+PDF Tools is a self-hosted web app with a Rust backend and Elm frontend. It
 turns PDF pages into PNG or JPEG images, extracts selected pages as individual
 PDFs in a ZIP, merges PDFs, converts ordered PNG or JPEG images into a PDF, and
 imposes artwork onto print sheets.
@@ -195,94 +195,71 @@ released-image deployment on the same port.
 
 ## Local development
 
-PDF Tools pins Rust 1.97.1, Leptos 0.8.20, the
-`wasm32-unknown-unknown` target, cargo-leptos 0.3.7, cargo-nextest 0.9.100,
-and just 1.58.0. Install the Rust toolchain and project tools once:
+The PDF app uses Rust 1.97.1 and Elm 0.19.1. The npm lockfile pins the Elm
+compiler, formatter, and test runner; no Rust WebAssembly target is required.
+The Nix `pdf-app` shell includes Rust, Node, PDFium, Python Playwright, PyMuPDF,
+Pillow, and patched Chromium and Firefox browsers:
 
 ```sh
-rustup toolchain install 1.97.1 --component clippy,rustfmt --target wasm32-unknown-unknown
-cargo install cargo-leptos --version 0.3.7 --locked
-cargo install cargo-nextest --version 0.9.100 --locked
-cargo install just --version 1.58.0 --locked
-```
-
-Ensure Cargo's binary directory is on `PATH` before running the project checks.
-
-Start the complete local application from the repository root:
-
-```sh
+nix develop .#pdf-app
 just dev
 ```
 
-If PDFium is not on the system library path, set
-`PDF_TOOLS_PDFIUM_PATH=/path/to/libpdfium.so`. The Docker image already bundles
-PDFium. The supervisor builds and starts the backend and cargo-leptos frontend
-watcher, verifies the application route, and then prints the ready URL. It owns and
-stops only the two processes it starts. Local services bind to loopback because
-PDF Tools has no built-in authentication. A directly run server also defaults
-to `127.0.0.1`; set `PDF_TOOLS_BIND_ADDRESS` to another IP address only when an
-intentional trusted-network bind is required. The container explicitly uses
-`0.0.0.0` internally while Compose keeps its host-side port on loopback.
-
-Build the optimized frontend into the exact directory served by Axum with:
+Without Nix, install Rust with Clippy and rustfmt, Node, and PDFium. Set
+`PDF_TOOLS_PDFIUM_PATH=/path/to/libpdfium.so` if PDFium is not on the library path.
+`just dev` installs the pinned npm dependencies, generates the API codecs, builds
+the frontend, starts Axum on <http://127.0.0.1:3200>, and watches frontend files.
+Restart the command after backend changes. The supervisor stops only its own
+processes. A directly run server defaults to loopback; set
+`PDF_TOOLS_BIND_ADDRESS` for an intentional trusted-network bind. The container
+uses `0.0.0.0` internally while Compose publishes to loopback.
 
 ```sh
-just release
+just release       # optimized Rust backend and Elm frontend
+just generate-api  # regenerate API types/codecs and Rust wire fixtures
+just test          # Rust and Elm tests
+just check         # formatting, lint, docs, contracts, builds, full acceptance
 ```
 
-The frontend release script builds with Wasm splitting and versioned asset
-names, resolves those names in the static HTML entrypoint, and generates gzip
-sidecars. The upload screen loads independently; generic PDF tools and imposition
-load when opened. A failed workflow download keeps the selected files available
-and offers Retry. Deploy the complete `frontend/dist` directory together so the
-bootstrap, shared code, and workflow modules remain compatible.
-Retain previous versioned asset directories if old tabs must continue opening
-unloaded workflows across updates. The standard replacement container does not
-retain prior bundles. If Retry cannot recover an old tab, its loading error offers
-**Reload and clear workspace** and explicitly warns that files and settings must
-be selected again. Reload never deletes the original files on disk.
+Axum serves `frontend/dist/app.html` and its versioned JavaScript/CSS assets.
+Deploy the complete distribution directory together. The build generates gzip
+sidecars and retains previous asset directories on incremental builds. The
+frontend uses relative API URLs and works on ordinary HTTP origins without
+`crypto.randomUUID`, clipboard permissions, or a secure context.
 
-Run the full project checks from the repository root:
+Elm owns workflow state, files, HTTP uploads, validation, polling, and stale
+response rejection. The small [browser bridge](frontend/bridge.js) manages
+binary preview blobs, object URLs, downloads, storage, native dialog focus, and
+crop pointer events. Rust remains authoritative for production geometry. See
+[frontend implementation notes](frontend/README.md) for resource lifecycles and
+the audited elm-rs generation boundary. The
+[migration acceptance record](elm-migration-acceptance.md) lists verified
+workflows, output checks, browser coverage, and environment limits.
+
+The acceptance scripts use Python Playwright against a real Axum server and
+inspect downloaded PDFs and raster images with PyMuPDF and Pillow. Normal
+workflow requests reach the backend; only explicit recovery tests inject delays
+or failures. With the application running:
 
 ```sh
-just check
+python3 scripts/elm-browser-acceptance.py --url http://127.0.0.1:3200
+python3 scripts/elm-http-acceptance.py --port 3200
 ```
 
-Tests target three boundaries: model tests cover layout, page selection, queue
-ordering and lifecycle rules; API tests process real PDFs and validate failures
-at the HTTP boundary; browser smoke checks cover actual input, focus, recovery,
-and downloads. Keep copy-only assertions and helpers used only by tests out of
-the suite; a queue-ID string assertion cannot prove that keyboard focus survives
-reordering.
+The full check launches an isolated release server with disposable data and runs
+Chromium and Firefox coverage. Screenshots and result records are written to
+`/tmp/pdf-elm-acceptance` by default. Override `PDF_TOOLS_ACCEPTANCE_OUTPUT` to
+change that directory. No customer files are required.
 
-With the app running at `http://127.0.0.1:3200`, run from the PDF project shell:
+Container packaging can be checked separately with a Docker or Podman engine:
 
-```nu
-nu scripts/workflow-browser-smoke.nu
+```sh
+python3 scripts/container-acceptance.py --engine docker
+# Reuse an image:
+python3 scripts/container-acceptance.py --engine podman --skip-build --image pdf-tools-elm:validation
 ```
 
-The full project check runs this smoke and the startup, inspection, transition,
-and mixed-artwork suites against its isolated release server.
-This self-contained smoke creates PDF fixtures in the browser and exercises
-mixed-size extraction, shortened-source range recovery, incomplete imposition
-inputs, repeat export, modal focus, repeated keyboard reordering, merge, and
-half-screen layout, upload failure/retry, cancellation, raster output, and fixed-page
-image conversion. It observes real downloads, reads back the extracted PDF,
-and verifies the image PDF's Letter landscape page dimensions.
-The mixed-artwork smoke takes an odd-ratio image through Letter fitting, crop
-positioning, bleed and PDF download, then rasterizes the actual downloaded PDF
-through the public API and checks colored landmarks and border pixels. It also
-checks mixed PDF sizes and selected-piece overrides. Deterministic labeled PDFs
-are generated by `scripts/smoke-fixtures.nu`; no customer files are required.
-
-Container packaging is checked separately because it requires a Docker engine:
-
-```nu
-nu scripts/container-smoke.nu
-```
-
-This builds a local validation image and starts only a disposable, loopback-bound
-container. It checks health, compressed assets, real workflow exports, and an
-old tab's recovery after a deployed module is physically removed and restored.
-It does not replace Compose services or mount persistent shop data. Use
-`--skip-build --image <image>` to check an already-built image.
+This starts a disposable loopback-bound container, verifies compressed assets,
+runs the same output-inspecting browser acceptance, and physically removes then
+restores the Elm bundle to verify startup recovery. It does not replace Compose
+services or mount persistent shop data.
