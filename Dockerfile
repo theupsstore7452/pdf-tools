@@ -1,6 +1,13 @@
 FROM --platform=$BUILDPLATFORM ghcr.io/nushell/nushell@sha256:4a635f5d1e7b7f22293daf4a3dd67de7eda50f6c3fd350ce9e622ece65463214 AS nushell
 
 FROM --platform=$BUILDPLATFORM docker.io/library/node@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS frontend
+RUN printf '%s\n' \
+      'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260801T000000Z bookworm main' \
+      > /etc/apt/sources.list \
+    && rm -f /etc/apt/sources.list.d/* \
+    && apt-get -o Acquire::Check-Valid-Until=false update \
+    && apt-get install -y --no-install-recommends ca-certificates=20230311+deb12u1 \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
