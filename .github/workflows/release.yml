@@ -111,7 +111,7 @@ jobs:
               }
               if not $ready { error make {msg: $"($arch) image did not become healthy"} }
               let index = http get --raw --max-time 10sec $url
-              let assets = $index | parse --regex '/(?P<name>pkg/[a-f0-9]{64}/pdf-tools-frontend\.[A-Za-z0-9_-]+\.(?:js|wasm|css))' | get name | uniq
+              let assets = $index | parse --regex '(?P<name>assets/[a-f0-9]{16}/(?:elm\.js|bridge\.js|app\.css))' | get name | uniq
               if ($assets | length) != 3 { error make {msg: "Missing versioned frontend bundle"} }
               for asset in $assets { http get --raw --max-time 30sec $"($url)/($asset)" | ignore }
               null

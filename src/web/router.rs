@@ -32,7 +32,7 @@ impl FrontendDist {
     /// # Errors
     ///
     /// Returns an error when the path is relative, is not a directory, or does
-    /// not contain the regular `app.html` entrypoint produced by cargo-leptos.
+    /// not contain the regular `app.html` entrypoint produced by the frontend build.
     pub fn validate(path: impl Into<PathBuf>) -> AppResult<Self> {
         let path = path.into();
         if !path.is_absolute() {

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Convert, split, merge, and impose PDFs."><title>PDF Tools</title>
+<script>
+{ let theme; try { theme=localStorage.getItem('pdf-tools-theme'); } catch (_) {} document.documentElement.dataset.theme=theme==='light'||theme==='dark'?theme:matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'; }
+</script>
+<link id="app-styles" rel="preload" as="style" href="__ASSETS__/app.css">
+<style>
+:root{background:#f4f7f8;color:#1f292d;font-family:system-ui} :root[data-theme=dark]{background:#111619;color:#e4ecef} body{margin:0} #app-startup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;width:min(28rem,calc(100% - 2rem))} #app-startup[hidden]{display:none} #app-startup button{padding:.75rem 1.5rem}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<section id="app-startup" aria-label="PDF Tools startup" hidden><p id="startup-status" role="status">Opening PDF Tools…</p><button id="startup-retry" hidden>Retry</button></section>
+<noscript>Enable JavaScript, then reload this page to use PDF Tools.</noscript>
+<script type="module">
+const startup=document.getElementById('app-startup'), status=document.getElementById('startup-status'), retry=document.getElementById('startup-retry');
+retry.addEventListener('click',()=>location.reload());
+const reveal=setTimeout(()=>{startup.hidden=false},Math.max(0,700-performance.now()));
+const slow=setTimeout(()=>{status.textContent='Loading is taking longer than expected. You can keep waiting or retry.';retry.hidden=false},15000);
+try{
+ await Promise.all([
+  new Promise((resolve,reject)=>{const css=document.getElementById('app-styles');css.onload=resolve;css.onerror=()=>reject(new Error('Stylesheet failed'));css.rel='stylesheet'}),
+  new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='__ASSETS__/elm.js';script.onload=resolve;script.onerror=()=>reject(new Error('Application failed'));document.head.append(script)})
+ ]);
+ const {connect}=await import('./__ASSETS__/bridge.js');
+ const app=Elm.Main.init({node:document.getElementById('app'),flags:document.documentElement.dataset.theme});connect(app);startup.remove();
+}catch(error){console.error(error);startup.hidden=false;status.textContent='PDF Tools couldn’t start. Check your connection and try again.';status.setAttribute('role','alert');retry.hidden=false}
+finally{clearTimeout(reveal);clearTimeout(slow)}
+</script>
+</body></html>

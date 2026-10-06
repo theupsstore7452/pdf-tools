@@ -45,3 +45,15 @@ zip = { version = "8", default-features = false, features = ["deflate-flate2-zli
 http-body = "1"
 serial_test = "4"
 tower = { version = "0.5", features = ["util"] }
+
+[features]
+elm-codegen = ["dep:elm_rs"]
+
+[dependencies.elm_rs]
+version = "=0.2.3"
+optional = true
+
+[[bin]]
+name = "generate-elm"
+path = "src/bin/generate-elm.rs"
+required-features = ["elm-codegen"]

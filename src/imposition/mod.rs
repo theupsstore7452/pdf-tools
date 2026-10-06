@@ -9,7 +9,7 @@ mod geometry;
 mod intake;
 mod layout;
 mod mixed;
-mod model;
+pub(crate) mod model;
 mod pdf;
 mod persistence;
 mod preset_store;

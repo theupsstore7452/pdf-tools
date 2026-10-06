@@ -4118,3 +4118,101 @@ input[aria-invalid="true"] {
     grid-column: auto;
   }
 }
+
+/* Elm keeps the established shell, tool grouping, and 360px setup rail.
+   These rules remove clipped controls and constrain popovers on short screens. */
+.elm-shell .tool-form-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.elm-shell .ready-card { min-height: 0; }
+.elm-shell .operation-chooser { display:flex; flex-wrap:wrap; gap:4px; }
+.elm-shell .operation-chooser button { min-height:44px; border:0; padding:8px 16px; background:transparent; color:var(--text-muted); }
+.elm-shell .operation-chooser button[aria-pressed=true] { color:var(--text-strong); box-shadow:inset 0 -3px var(--accent); }
+.elm-shell .elm-status:empty { display:none; }
+.elm-shell .elm-status .error { padding:8px 16px; }
+.elm-shell .elm-status .progress-status { padding:8px 16px; }
+.elm-shell .elm-status .export-notice { padding:8px 16px; }
+.elm-shell .elm-impose-grid { flex:1; min-height:0; height:100%; }
+.elm-shell .elm-setup { grid-template-rows:auto minmax(0,1fr) auto auto; padding-top:0 !important; }
+.elm-shell .elm-setup .gang-setup-fields { overflow:auto; min-height:0; padding:16px; display:block; }
+.elm-shell .elm-setup .setup-step-panel { display:grid; gap:16px; }
+.elm-shell .elm-setup-actions { display:flex; flex-wrap:wrap; gap:8px; padding:12px; border-top:1px solid var(--border); }
+.elm-shell .elm-setup .setup-stepper { margin:0; }
+.elm-shell .elm-impose-grid > .gang-rail-switcher { display:none; }
+.elm-shell .elm-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px 12px; overflow:visible; min-width:0; z-index:10; }
+.elm-toolbar details { position:relative; }
+.elm-toolbar details > summary { cursor:pointer; padding:8px; min-height:36px; color:var(--text-ui); }
+.elm-toolbar details[open] > fieldset, .elm-toolbar details[open] > label { background:var(--surface); }
+.elm-toolbar details > fieldset { position:absolute; top:100%; right:0; z-index:20; width:min(350px,calc(100vw - 40px)); max-height:min(580px,calc(100dvh - 150px)); overflow:auto; border:1px solid var(--border); border-radius:8px; padding:16px; display:grid; gap:12px; box-shadow:0 6px 20px var(--shadow); }
+.elm-toolbar > details:last-child[open] { background:transparent; border:0; padding:0; }
+.elm-shell .elm-preview-region { grid-area:preview; display:grid; grid-template-rows:minmax(0,1fr) auto; min-width:0; min-height:0; }
+.elm-shell .elm-sheet-stage { overflow:auto !important; padding:16px; }
+.elm-shell .elm-preview-summary { padding:8px 16px; max-height:100px; overflow:auto; border-top:1px solid var(--border); font-size:13px; }
+.elm-shell .elm-collapsed { grid-template-columns:1fr !important; grid-template-areas:'toolbar' 'preview' !important; }
+.elm-shell .elm-collapsed > .elm-setup { display:none; }
+.elm-shell .elm-saved { display:grid; gap:12px; padding:8px 0; }
+.elm-saved ul { padding:0; list-style:none; margin:0; }
+.elm-saved li { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:8px 0; border-bottom:1px solid var(--border); overflow-wrap:anywhere; }
+.elm-button-row { display:flex; flex-wrap:wrap; gap:8px; }
+.elm-saved-footer { max-height:180px; overflow:auto; padding:12px; }
+.elm-dialog-content { display:grid; gap:16px; }
+.elm-crop-editor { height:180px; overflow:hidden; background:var(--canvas); touch-action:none; cursor:grab; border:1px solid var(--border); }
+.elm-shell .preview-cache-status[role="alert"] { pointer-events:auto; }
+.elm-shell .file-meta { min-width:0; overflow:hidden; }
+.elm-shell .file-meta > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.elm-shell .file-row-actions { display:flex; flex:none; }
+.elm-shell .file-list { overflow:auto; }
+.elm-shell .quantity-dialog { max-height:calc(100dvh - 32px); overflow:auto; }
+@media (max-width:1100px) {
+ .elm-shell .elm-impose-grid, .elm-shell .elm-impose-grid.elm-collapsed { grid-template-columns:1fr !important; grid-template-rows:auto auto minmax(0,1fr) !important; grid-template-areas:'toolbar' 'switcher' 'rail' !important; }
+ .elm-shell .elm-impose-grid > .gang-rail-switcher { display:grid; grid-area:switcher; }
+ .elm-shell .elm-impose-grid > .elm-setup, .elm-shell .elm-impose-grid > .elm-preview-region { grid-area:rail; padding-top:0; }
+ .elm-shell .elm-impose-grid > .elm-preview-region { display:none; }
+ .elm-shell .elm-preview-active > .elm-preview-region { display:grid; }
+ .elm-shell .elm-preview-active > .elm-setup { display:none; }
+ .elm-shell .elm-collapsed > .elm-setup { display:grid; }
+ .elm-shell .elm-toolbar { padding:6px; gap:4px; }
+ .elm-shell .elm-toolbar > .ghost-button { display:none; }
+ .elm-shell .sheet-preview-nav { width:auto; flex-wrap:wrap; }
+ .elm-shell .sheet-preview-nav span { font-size:13px; }
+}
+@media (max-width:540px) {
+ .elm-shell .app-brand { white-space:nowrap; grid-column:1; grid-row:1; }
+ .elm-shell .app-header-actions { grid-column:1 / -1; grid-row:2; justify-content:flex-start; }
+ .elm-shell .app-header { grid-template-columns:minmax(0,1fr) auto; gap:8px; }
+ .elm-shell .app-file-context { grid-column:1 / -1; grid-row:3; }
+ .elm-shell .app-file-context { max-width:100%; }
+ .elm-shell .app-header-actions { flex-wrap:wrap; gap:4px; }
+ .elm-shell .app-header-actions button { padding:6px 8px; min-height:36px; }
+ .elm-shell .operation-chooser button { padding:6px 8px; font-size:13px; }
+ .elm-toolbar .sheet-preview-nav { gap:4px; }
+ .elm-toolbar .sheet-preview-nav button { padding:6px; font-size:12px; }
+ .elm-toolbar details > fieldset { left:0; right:auto; }
+ .elm-shell .file-row { gap:6px; }
+}
+@media (max-height:650px) and (min-width:1101px) {
+ .elm-shell { padding:6px 0; }
+ .elm-shell .app-header { min-height:44px; padding:6px 12px; }
+ .elm-shell .elm-preview-summary { max-height:65px; }
+}
+.elm-shell .file-row { grid-template-columns:24px minmax(0,1fr) auto; align-items:center; }
+.elm-shell .file-row .file-meta { text-align:left; display:grid; gap:3px; }
+.elm-shell .file-row .file-row-actions { grid-column:3; }
+.elm-shell .setup-stepper ol { grid-template-columns:.7fr 1.5fr 1.3fr .7fr; gap:2px; }
+.elm-shell .setup-stepper button { padding:6px 3px; font-size:12px; overflow-wrap:normal; word-break:normal; }
+.elm-shell .setup-step-label { font-size:13px; overflow-wrap:normal; word-break:normal; hyphens:none; }
+.elm-shell .elm-setup fieldset { min-width:0; border:0; margin:0; padding:0; }
+.elm-shell .elm-setup .segmented-control { flex-wrap:wrap; }
+.elm-shell .elm-setup .segmented-control button { white-space:normal; text-overflow:clip; overflow:visible; font-size:14px; min-width:0; }
+.elm-shell .gang-workspace { position:relative; }
+.elm-shell .elm-impose-busy > .elm-status { position:absolute; top:0; left:0; right:0; z-index:25; background:var(--surface); box-shadow:0 3px 12px var(--shadow); }
+@media (max-width:540px) {
+ .elm-shell .app-header-actions button { font-size:12px; padding:5px 6px; }
+ .elm-shell .theme-toggle { min-width:32px; width:32px; }
+ .elm-shell .sheet-nav-label { display:none; }
+ .elm-shell .sheet-nav-button { min-width:32px; min-height:32px; padding:4px; }
+ .elm-shell .sheet-nav-button.previous::before { content:'‹'; font-size:20px; }
+ .elm-shell .sheet-nav-button.next::before { content:'›'; font-size:20px; }
+ .elm-shell .elm-toolbar details > summary { min-height:32px; padding:4px; }
+}
+@media (max-width:360px) {
+ .elm-shell .setup-step-label { font-size:12px; }
+}

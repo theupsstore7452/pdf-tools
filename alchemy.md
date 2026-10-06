@@ -10,13 +10,13 @@ This document records the durable rules that PDF Tools changes must preserve.
 - **Evidence:** Browser checks of fast startup without an indicator, a delayed request crossing the 700 ms threshold, immediate failed-request feedback, retry after restoring the request, and saved/system themes before initialization.
 - **Origin:** The user retained client rendering and startup recovery, then explicitly replaced the flashing loading page with a 700 ms delayed indicator and immediate failure feedback when updating PR 7.
 
-## INV-DEFERRED-WORKFLOWS: Initialize the upload screen independently
+## INV-WORKFLOW-RECOVERY: Preserve state across workflow loading
 
 - **Scope:** Browser startup and first entry into a PDF workflow.
-- **Rule:** The upload screen must become interactive without fetching the generic-tool or imposition Wasm modules. Load those modules on demand while retaining the app's selected file objects and settings. A failed module request must allow retry without reselecting files; a completion after leaving a workflow must not restore that workflow. Production module URLs must identify the matching build so an existing tab cannot load incompatible replacement code.
-- **Owner:** The frontend workflow-loading boundary and release asset build.
-- **Evidence:** Browser resource inspection at startup, first workflow entry, failed-load retry, and navigation during a delayed load; release smoke checks of versioned bootstrap and deferred assets.
-- **Origin:** The user approved initializing the upload screen separately and loading workflow code when needed, with selected files preserved across loading.
+- **Rule:** Retain selected files and settings during loading and recovery. A failed workflow request must allow retry without reselecting files; a completion after leaving a workflow must not restore that workflow. Production asset URLs must identify the matching build so an existing tab cannot load incompatible replacement code.
+- **Owner:** The Elm workflow state machine and release asset build.
+- **Evidence:** Browser checks of failed-request retry and navigation during delayed requests; release smoke checks of versioned Elm, bridge, and CSS assets.
+- **Origin:** Preserves the state retention and asset identity requirements of the former deferred Leptos workflows; the main Elm frontend loads its workflow code in one bundle.
 
 ## INV-DEV-SERVER-PORT: Keep the inspection server on port 3200
 

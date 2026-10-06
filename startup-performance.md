@@ -1,5 +1,10 @@
 # Deferred workflow startup
 
+Historical measurements for the former Leptos frontend. The main application
+now uses one Elm bundle; these timings and deferred-module details do not apply
+to it. See [Elm migration acceptance](elm-migration-acceptance.md) for current
+asset and startup recovery checks.
+
 Measured on 2026-09-05 UTC against the client-rendered PR 7 baseline (`56e675c3`).
 Both variants used release builds, gzip, and the same browser and machine.
 Five fresh browser sessions per variant alternated between baseline and split.

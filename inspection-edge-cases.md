@@ -1,5 +1,8 @@
 # PDF inspection edge-case audit
 
+Historical acceptance record for the former Leptos frontend. For the current
+Elm frontend, see [Elm migration acceptance](elm-migration-acceptance.md).
+
 This agent-browser audit used separate subagents for imposition and conversion
 workflows, with the parent auditing inspection cancellation and integrating fixes.
 

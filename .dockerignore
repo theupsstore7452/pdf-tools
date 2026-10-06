@@ -1,7 +1,6 @@
 target
 data
 frontend/dist
-frontend/target
 coverage
 .git
 .codex
@@ -11,3 +10,7 @@ coverage
 .env.*
 !.env.example
 *.log
+
+frontend/node_modules
+frontend/elm-stuff
+test-results

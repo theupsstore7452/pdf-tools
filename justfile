@@ -2,33 +2,34 @@ default:
     @just --list
 
 dev:
-    nu --no-config-file scripts/dev.nu
+    scripts/dev.sh
+
+generate-api:
+    scripts/generate-elm.sh
 
 check:
-    scripts/check.nu pdf-app
+    scripts/check.sh
 
 fmt:
     cargo fmt --all
-    cargo fmt --manifest-path frontend/Cargo.toml
+    cd frontend && npm run format
 
 lint:
-    cargo clippy --workspace --all-targets --all-features -- -D warnings
-    cargo clippy --manifest-path frontend/Cargo.toml --all-targets --locked -- -D warnings
-    cargo clippy --manifest-path frontend/Cargo.toml --target wasm32-unknown-unknown --release --locked -- -D warnings
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+    cd frontend && npm run format:check
 
 test:
-    cargo nextest run --workspace --all-features
-    cargo nextest run --manifest-path frontend/Cargo.toml --locked
+    cargo test --locked --workspace --all-features
+    cd frontend && npm test
 
 build:
-    cargo build --locked
-    cd frontend && cargo leptos build --frontend-only --split --lib-cargo-args=--locked
+    cargo build --locked --bin pdf-tools-server
+    cd frontend && npm ci && npm run build
 
 release:
-    cargo build --release --locked
-    nu --no-config-file frontend/scripts/build-release.nu
+    cargo build --release --locked --bin pdf-tools-server
+    cd frontend && npm ci && npm run build
 
 clean:
     cargo clean
-    cargo clean --manifest-path frontend/Cargo.toml
-    rm -rf frontend/dist
+    rm -rf frontend/dist frontend/elm-stuff

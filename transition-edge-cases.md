@@ -1,5 +1,8 @@
 # Loading transition fixes
 
+Historical acceptance record for the former Leptos frontend. For the current
+Elm frontend, see [Elm migration acceptance](elm-migration-acceptance.md).
+
 Agent-browser frame measurements found three related transitions:
 
 - First upload mounted a 118 px loading card before a 506 px workflow, moving

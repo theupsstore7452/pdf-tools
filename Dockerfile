@@ -1,34 +1,11 @@
 FROM --platform=$BUILDPLATFORM ghcr.io/nushell/nushell@sha256:4a635f5d1e7b7f22293daf4a3dd67de7eda50f6c3fd350ce9e622ece65463214 AS nushell
 
-FROM --platform=$BUILDPLATFORM docker.io/library/rust@sha256:0e2bcaef56d041a486784e54104a81aebe0da44bd03019bd70bc0401e42e4a97 AS frontend
-ARG BUILDARCH
-RUN test "$BUILDARCH" = amd64
-RUN printf '%s\n' \
-      'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260801T000000Z bookworm main' \
-      > /etc/apt/sources.list \
-    && rm -f /etc/apt/sources.list.d/* \
-    && apt-get -o Acquire::Check-Valid-Until=false update \
-    && apt-get install -y --no-install-recommends \
-      ca-certificates=20230311+deb12u1 \
-      clang=1:14.0-55.7~deb12u1 \
-      curl=7.88.1-10+deb12u15 \
-      gzip=1.12-1 \
-    && rm -rf /var/lib/apt/lists/* \
-    && rustup target add wasm32-unknown-unknown
-COPY --from=nushell /usr/bin/nu /usr/bin/nu
-RUN archive=/tmp/cargo-leptos.tar.gz \
-    && curl --fail --location --silent --show-error --output "$archive" \
-      https://github.com/leptos-rs/cargo-leptos/releases/download/v0.3.7/cargo-leptos-x86_64-unknown-linux-gnu.tar.gz \
-    && printf '%s  %s\n' fda80f4845e92d0e8f5ec13cf1a46982ba7a518ae01182e7e4201312944bc05d "$archive" \
-      | sha256sum --check --strict \
-    && tar --extract --gzip --file "$archive" --directory /usr/local/bin --strip-components=1 \
-      cargo-leptos-x86_64-unknown-linux-gnu/cargo-leptos \
-    && rm "$archive" \
-    && test "$(cargo leptos --version)" = 'cargo-leptos 0.3.7'
+FROM --platform=$BUILDPLATFORM docker.io/library/node@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS frontend
 WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
 COPY frontend ./
-RUN nu --no-config-file scripts/build-release.nu \
-    && test -f dist/app.html
+RUN npm run build && test -f dist/app.html
 
 FROM --platform=$BUILDPLATFORM docker.io/library/rust@sha256:0e2bcaef56d041a486784e54104a81aebe0da44bd03019bd70bc0401e42e4a97 AS backend
 ARG TARGETARCH
@@ -49,6 +26,7 @@ RUN target="$(if test "$TARGETARCH" = amd64; then printf x86_64-unknown-linux-gn
 WORKDIR /app
 COPY Cargo.toml ./
 COPY Cargo.lock ./
+COPY build.rs ./
 COPY src ./src
 RUN target="$(if test "$TARGETARCH" = amd64; then printf x86_64-unknown-linux-gnu; else printf aarch64-unknown-linux-gnu; fi)" \
     && if test "$TARGETARCH" = arm64; then \
