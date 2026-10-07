@@ -13,6 +13,8 @@
 }
 
 :root {
+  --workspace-duration: 480ms;
+  --workspace-easing: cubic-bezier(0.22, 1, 0.36, 1);
   color-scheme: light;
   --bg: #f4f7f8;
   --surface: #ffffff;
@@ -184,7 +186,6 @@ p {
   overflow: hidden;
   margin: 0 auto;
   padding: 12px 0 18px;
-  transition: width 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .shell.generic-shell {
@@ -197,7 +198,6 @@ p {
 .app-header,
 .ready-shell {
   transform: translateY(0);
-  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .generic-shell .app-header,
@@ -333,81 +333,33 @@ p {
 
 .theme-toggle {
   display: inline-grid;
-  width: 72px;
-  min-width: 72px;
+  flex: none;
+  width: 44px;
+  min-width: 44px;
   height: 44px;
   min-height: 44px;
   place-items: center;
-  border: 0;
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   padding: 0;
-  background: transparent;
-}
-
-.theme-toggle:hover .theme-toggle-track {
-  border-color: var(--border-hover);
-}
-
-.theme-toggle-track {
-  position: relative;
-  display: flex;
-  width: 100%;
-  height: 100%;
-  align-items: center;
-  justify-content: space-between;
-  border: 1px solid var(--border-strong);
-  border-radius: 7px;
-  padding: 0 11px;
+  color: var(--text-ui);
   background: var(--surface-muted);
-  transition: border-color 160ms ease, background-color 160ms ease;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
 }
 
-.theme-toggle-glyph {
-  position: relative;
-  z-index: 2;
-  width: 13px;
-  height: 13px;
-  flex: none;
-  color: var(--text-subtle);
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: color 160ms ease;
-}
-
-.theme-toggle-sun {
-  color: var(--text-strong);
-}
-
-.theme-toggle-thumb {
-  position: absolute;
-  z-index: 1;
-  top: 3px;
-  left: 2px;
-  width: 32px;
-  height: 36px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--surface);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 24%);
-  transition: transform 160ms ease, background-color 160ms ease;
-}
-
-:root[data-theme="dark"] .theme-toggle-track {
-  border-color: var(--border-hover);
+.theme-toggle[aria-checked="true"] {
+  color: var(--accent);
   background: var(--accent-soft);
 }
 
-:root[data-theme="dark"] .theme-toggle-sun {
-  color: var(--text-subtle);
-}
-
-:root[data-theme="dark"] .theme-toggle-moon {
+.theme-toggle:hover {
+  border-color: var(--accent);
   color: var(--text-strong);
+  background: var(--accent-soft);
 }
 
-:root[data-theme="dark"] .theme-toggle-thumb {
-  transform: translateX(34px);
+.theme-toggle:active {
+  background: var(--surface);
 }
 
 .empty-shell {
@@ -495,6 +447,7 @@ p {
 }
 
 .empty-state {
+  position: relative;
   align-self: center;
   justify-self: center;
   display: grid;
@@ -508,6 +461,12 @@ p {
   transition:
     border-color 160ms ease,
     background-color 160ms ease;
+}
+
+.empty-state > .theme-toggle {
+  position: absolute;
+  top: 12px;
+  right: 12px;
 }
 
 .empty-state:hover,
@@ -596,7 +555,6 @@ p {
   padding: 16px;
   background: var(--surface);
   box-shadow: 0 8px 24px var(--shadow);
-  transition: height 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .ready-card.imposing {
@@ -605,15 +563,16 @@ p {
   overflow: hidden;
   gap: 0;
   border: 0;
+  border-radius: 0;
   padding: 0;
-  background: transparent;
+  background: var(--surface);
   box-shadow: none;
 }
 
 .ready-card.imposing .operation-chooser {
   display: block;
-  border: 1px solid var(--border);
-  border-bottom: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
   border-radius: 0;
   padding: 0;
   background: var(--surface);
@@ -1257,8 +1216,8 @@ textarea {
   }
 
   .theme-toggle {
-    min-width: 72px;
-    width: 72px;
+    min-width: 44px;
+    width: 44px;
     padding: 0;
   }
 
@@ -1396,7 +1355,8 @@ textarea {
   }
 }
 
-/* Impose uses the viewport. Other workflows retain their centered shell. */
+/* The impose editor fills the screen; the bridge animates its frame from
+   the previous tool's measured bounds without scaling text or controls. */
 html:has(.ready-card.imposing),
 body:has(.ready-card.imposing),
 #app:has(.ready-card.imposing) {
@@ -1414,10 +1374,20 @@ body:has(.ready-card.imposing),
 
 .shell:has(.ready-card.imposing) .app-header {
   width: 100%;
-  margin-bottom: 10px;
+  margin-bottom: 0;
+  border-width: 0 0 1px;
   border-radius: 0;
-  padding: 8px;
+  padding: 8px 12px;
   box-shadow: none;
+}
+
+.shell.elm-shell[data-workspace-animating] {
+  grid-template-rows: var(--workspace-rows);
+  overflow: visible;
+}
+
+.shell[data-workspace-animating] .app-header {
+  justify-self: start;
 }
 
 .shell:has(.ready-card.imposing) .app-brand strong {
@@ -3107,9 +3077,6 @@ input[aria-invalid="true"] {
   .operation-tabs button,
   .empty-state,
   .theme-toggle,
-  .theme-toggle-track,
-  .theme-toggle-glyph,
-  .theme-toggle-thumb,
   .sheet-stage .sheet-svg,
   .option-card {
     transition: none;
@@ -4206,7 +4173,7 @@ input[aria-invalid="true"] {
 .elm-shell .elm-impose-busy > .elm-status { position:absolute; top:0; left:0; right:0; z-index:25; background:var(--surface); box-shadow:0 3px 12px var(--shadow); }
 @media (max-width:540px) {
  .elm-shell .app-header-actions button { font-size:12px; padding:5px 6px; }
- .elm-shell .theme-toggle { min-width:32px; width:32px; }
+ .elm-shell .app-header-actions .theme-toggle { min-width:44px; width:44px; height:44px; min-height:44px; padding:0; }
  .elm-shell .sheet-nav-label { display:none; }
  .elm-shell .sheet-nav-button { min-width:32px; min-height:32px; padding:4px; }
  .elm-shell .sheet-nav-button.previous::before { content:'‹'; font-size:20px; }
@@ -4214,9 +4181,5 @@ input[aria-invalid="true"] {
  .elm-shell .elm-toolbar details > summary { min-height:32px; padding:4px; }
 }
 @media (max-width:360px) {
- .elm-shell .app-header { position:relative; }
- /* Keep the theme switch beside the brand so font differences cannot wrap
-    it onto another action row and consume the short screen's setup space. */
- .elm-shell .app-header-actions .theme-toggle { position:absolute; top:4px; right:8px; }
  .elm-shell .setup-step-label { font-size:12px; }
 }

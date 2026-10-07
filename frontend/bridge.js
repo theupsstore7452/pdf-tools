@@ -2,6 +2,52 @@
    jobs, and production geometry belong to Elm/Rust. No secure-context APIs. */
 export function connect(app) {
   const send = event => app.ports.browserEvents.send(event);
+  let workspaceFrame, workspaceAnimations = [];
+  const stopWorkspaceTransition = () => {
+    cancelAnimationFrame(workspaceFrame);
+    workspaceAnimations.forEach(animation => animation.cancel());
+    workspaceAnimations = [];
+    const shell = document.querySelector('.elm-shell');
+    shell?.removeAttribute('data-workspace-animating');
+    shell?.style.removeProperty('--workspace-rows');
+  };
+  const animateWorkspace = () => {
+    const shell = document.querySelector('.elm-shell');
+    if (!shell) return;
+    // Capture the current visual bounds before Elm renders the new workflow.
+    // This also lets a reversed transition continue from its current position.
+    const frames = ['.app-header', '.ready-shell', '.ready-card'].map(selector => {
+      const element = shell.querySelector(selector);
+      return element && {element, bounds:element.getBoundingClientRect(), radius:getComputedStyle(element).borderRadius};
+    }).filter(Boolean);
+    stopWorkspaceTransition();
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    workspaceFrame = requestAnimationFrame(() => {
+      if (!shell.isConnected || shell.classList.contains('empty-shell')) return;
+      const style = getComputedStyle(shell);
+      const options = {duration:parseFloat(style.getPropertyValue('--workspace-duration')), easing:style.getPropertyValue('--workspace-easing').trim()};
+      // Keep the grid's final positions fixed while the child frames resize;
+      // centering must not shift a second time during the return animation.
+      shell.style.setProperty('--workspace-rows', style.gridTemplateRows);
+      shell.setAttribute('data-workspace-animating', '');
+      const targets = frames.filter(frame => frame.element.isConnected).map(frame => ({...frame, next:frame.element.getBoundingClientRect(), nextRadius:getComputedStyle(frame.element).borderRadius}));
+      workspaceAnimations = targets.map(({element, bounds, radius, next, nextRadius}) => {
+        const shape = {borderRadius:radius, height:`${bounds.height}px`};
+        const settled = {borderRadius:nextRadius, height:`${next.height}px`};
+        if (!element.matches('.ready-card')) {
+          Object.assign(shape, {width:`${bounds.width}px`, transform:`translate(${bounds.x-next.x}px, ${bounds.y-next.y}px)`});
+          Object.assign(settled, {width:`${next.width}px`, transform:'translate(0, 0)'});
+        }
+        return element.animate([shape, settled], options);
+      });
+      const current = workspaceAnimations;
+      Promise.allSettled(current.map(animation => animation.finished)).then(() => {
+        if (workspaceAnimations === current) stopWorkspaceTransition();
+      });
+    });
+  };
+  window.addEventListener('resize', stopWorkspaceTransition);
+  matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', stopWorkspaceTransition);
   const cache = new Map();
   let protectedUrls = new Set(), previewController, downloadController, activeSource, restoreFocus, identity = 0;
   let cacheBytes = 0;
@@ -110,6 +156,7 @@ export function connect(app) {
   }
   app.ports.resources.subscribe(command => {
     switch(command.action) {
+      case 'workspaceTransition': animateWorkspace(); break;
       case 'identity': identity = command.token; downloadController?.abort(); break;
       case 'preview': void preview(command); break;
       case 'cancelPreview': previewController?.abort(); break;
@@ -152,12 +199,6 @@ export function connect(app) {
   };
   document.addEventListener('toggle',event => requestAnimationFrame(() => fitPopover(event.target)),true);
   window.addEventListener('resize',() => document.querySelectorAll('.elm-toolbar details[open]').forEach(fitPopover));
-  const scheme = matchMedia('(prefers-color-scheme: dark)');
-  scheme.addEventListener('change',event => {
-    let saved;
-    try { saved = localStorage.getItem('pdf-tools-theme'); } catch (_) {}
-    if (!saved) { const value = event.matches ? 'dark' : 'light'; document.documentElement.dataset.theme = value; send({action:'theme',value}); }
-  });
   // FileList is not a JSON array; keep File objects native and adapt only the
   // browser event payload for Elm's File.decoder.
   document.addEventListener('drop',event => {
