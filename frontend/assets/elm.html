@@ -4,7 +4,7 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="Convert, split, merge, and impose PDFs."><title>PDF Tools</title>
 <script>
-{ let theme; try { theme=localStorage.getItem('pdf-tools-theme'); } catch (_) {} document.documentElement.dataset.theme=theme==='light'||theme==='dark'?theme:matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'; }
+{ let theme; try { theme=localStorage.getItem('pdf-tools-theme'); } catch (_) {} document.documentElement.dataset.theme=theme==='light'? 'light':'dark'; }
 </script>
 <link id="app-styles" rel="preload" as="style" href="__ASSETS__/app.css">
 <style>

@@ -11,6 +11,8 @@ import Imposition as I
 import Json.Decode as D
 import Model exposing (..)
 import Preview
+import Svg
+import Svg.Attributes as SA
 import Validation as V
 
 
@@ -162,8 +164,11 @@ headerView m =
             , small [] [ text (String.fromInt (List.sum (List.map (.file >> File.size) m.files) // 1024) ++ " KB") ]
             ]
         , div [ class "app-header-actions" ]
-            [ button [ class "ghost-button", disabled m.busy, onClick (Browse True) ]
-                [ text
+            [ button
+                [ class "ghost-button"
+                , disabled m.busy
+                , onClick (Browse True)
+                , attribute "aria-label"
                     (if m.operation == Impose then
                         "Add artwork"
 
@@ -171,8 +176,22 @@ headerView m =
                         "Add files"
                     )
                 ]
-            , button [ class "ghost-button", disabled m.busy, onClick (Browse False) ]
-                [ text
+                [ span [ class "button-label-wide" ]
+                    [ text
+                        (if m.operation == Impose then
+                            "Add artwork"
+
+                         else
+                            "Add files"
+                        )
+                    ]
+                , span [ class "button-label-short", attribute "aria-hidden" "true" ] [ text "Add" ]
+                ]
+            , button
+                [ class "ghost-button"
+                , disabled m.busy
+                , onClick (Browse False)
+                , attribute "aria-label"
                     (if m.operation == Impose then
                         "Replace artwork"
 
@@ -180,35 +199,63 @@ headerView m =
                         "Replace files"
                     )
                 ]
+                [ span [ class "button-label-wide" ]
+                    [ text
+                        (if m.operation == Impose then
+                            "Replace artwork"
+
+                         else
+                            "Replace files"
+                        )
+                    ]
+                , span [ class "button-label-short", attribute "aria-hidden" "true" ] [ text "Replace" ]
+                ]
             , button [ id "clear-workspace-trigger", class "clear-workspace-button", disabled m.busy, onClick (OpenDialog "clear") ] [ text "Clear" ]
-            , button
-                [ class "theme-toggle"
-                , attribute "role" "switch"
-                , attribute "aria-checked"
-                    (if m.theme == "dark" then
-                        "true"
-
-                     else
-                        "false"
-                    )
-                , attribute "aria-label"
-                    (if m.theme == "dark" then
-                        "Switch to light mode"
-
-                     else
-                        "Switch to dark mode"
-                    )
-                , onClick (Toggle "theme")
-                ]
-                [ text
-                    (if m.theme == "dark" then
-                        "☾"
-
-                     else
-                        "☀"
-                    )
-                ]
+            , themeToggle m
             ]
+        ]
+
+
+themeToggle : Model -> Html Msg
+themeToggle m =
+    button
+        [ type_ "button"
+        , class "theme-toggle"
+        , attribute "role" "switch"
+        , attribute "aria-label" "Dark mode"
+        , attribute "aria-checked"
+            (if m.theme == "dark" then
+                "true"
+
+             else
+                "false"
+            )
+        , title
+            (if m.theme == "dark" then
+                "Switch to light mode"
+
+             else
+                "Switch to dark mode"
+            )
+        , onClick (Toggle "theme")
+        ]
+        [ Svg.svg
+            [ SA.class "ui-icon theme-toggle-icon"
+            , SA.viewBox "0 0 24 24"
+            , SA.width "20"
+            , SA.height "20"
+            , SA.fill "none"
+            , SA.stroke "currentColor"
+            , attribute "aria-hidden" "true"
+            ]
+            (if m.theme == "dark" then
+                [ Svg.path [ SA.d "M20.9 13.3A9 9 0 0 1 10.7 3.1 9 9 0 1 0 20.9 13.3Z" ] [] ]
+
+             else
+                [ Svg.circle [ SA.cx "12", SA.cy "12", SA.r "4" ] []
+                , Svg.path [ SA.d "M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" ] []
+                ]
+            )
         ]
 
 
@@ -253,7 +300,7 @@ statusView m =
 
 emptyView : Model -> Html Msg
 emptyView m =
-    section [ class "empty-state" ] [ div [ class "empty-state-content" ] [ div [ class "empty-intro" ] [ p [ class "eyebrow" ] [ text "PDF Tools" ], h1 [] [ text "Upload files" ] ], button [ id "browse-files", class "primary-button", disabled m.busy, onClick (Browse False) ] [ text "Browse files" ], p [ id "empty-state-description" ] [ text "PDF, PNG, or JPEG. Drop files here to begin." ], statusView m ] ]
+    section [ class "empty-state" ] [ themeToggle m, div [ class "empty-state-content" ] [ div [ class "empty-intro" ] [ p [ class "eyebrow" ] [ text "PDF Tools" ], h1 [] [ text "Upload files" ] ], button [ id "browse-files", class "primary-button", disabled m.busy, onClick (Browse False) ] [ text "Browse files" ], p [ id "empty-state-description" ] [ text "PDF, PNG, or JPEG. Drop files here to begin." ], statusView m ] ]
 
 
 queueView : Model -> Html Msg

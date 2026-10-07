@@ -653,12 +653,19 @@ updateInternal msg m =
                 let
                     next =
                         { m | operation = op, error = "", notice = "", epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1 }
+
+                    ( updated, cmd ) =
+                        if op == Impose then
+                            prepare next
+
+                        else
+                            ( { next | source = Nothing, display = Nothing, layout = Nothing, layoutReady = False }, Cmd.batch [ Http.cancel "layout", bridge "clearPreviews" [], Maybe.map (.sourceId >> (\id -> delete ("gang-up/sources/" ++ id))) m.source |> Maybe.withDefault Cmd.none ] )
                 in
-                if op == Impose then
-                    prepare next
+                if op == Impose || m.operation == Impose then
+                    ( updated, Cmd.batch [ bridge "workspaceTransition" [], cmd ] )
 
                 else
-                    ( { next | source = Nothing, display = Nothing, layout = Nothing, layoutReady = False }, Cmd.batch [ Http.cancel "layout", bridge "clearPreviews" [], Maybe.map (.sourceId >> (\id -> delete ("gang-up/sources/" ++ id))) m.source |> Maybe.withDefault Cmd.none ] )
+                    ( updated, cmd )
 
         Field key value ->
             field key value m

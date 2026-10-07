@@ -18,7 +18,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--url', default='http://127.0.0.1:3210')
 parser.add_argument('--browsers', default='chromium,firefox')
 parser.add_argument('--output', default='/tmp/pdf-elm-acceptance')
-parser.add_argument('--checks', default='general,recovery,intake_and_keyboard,fitting,mixed_and_saved,preview_recovery,lifecycle,responsive,startup')
+parser.add_argument('--checks', default='theme,general,workspace_animation,recovery,intake_and_keyboard,fitting,mixed_and_saved,preview_recovery,lifecycle,responsive,startup')
 args = parser.parse_args()
 root = pathlib.Path(args.output)
 root.mkdir(parents=True, exist_ok=True)
@@ -141,6 +141,44 @@ class Suite:
     def switch(self, name):
         self.idle()
         self.button(name).click()
+
+    def theme(self):
+        for saved, expected in [(None, 'dark'), ('invalid', 'dark'), ('light', 'light'), ('dark', 'dark'), ('blocked', 'dark')]:
+            context = self.browser.new_context(color_scheme='light', viewport={'width': 390, 'height': 700})
+            if saved == 'blocked':
+                context.add_init_script("Object.defineProperty(window, 'localStorage', {get() {throw new Error('Storage unavailable')}})")
+            elif saved is not None:
+                context.add_init_script(f"localStorage.setItem('pdf-tools-theme', {json.dumps(saved)})")
+            page = context.new_page()
+            page.goto(args.url)
+            toggle = page.get_by_role('switch', name='Dark mode')
+            expect(toggle).to_be_visible()
+            expect(page.locator('html')).to_have_attribute('data-theme', expected)
+            expect(toggle).to_have_attribute('aria-checked', str(expected == 'dark').lower())
+            page.emulate_media(color_scheme='dark')
+            page.emulate_media(color_scheme='light')
+            expect(page.locator('html')).to_have_attribute('data-theme', expected)
+            toggle.focus()
+            expect(toggle).to_be_focused()
+            toggle.press('Space')
+            opposite = 'light' if expected == 'dark' else 'dark'
+            expect(page.locator('html')).to_have_attribute('data-theme', opposite)
+            expect(toggle).to_have_attribute('aria-checked', str(opposite == 'dark').lower())
+            toggle.press('Enter')
+            expect(page.locator('html')).to_have_attribute('data-theme', expected)
+            context.close()
+
+        context = self.browser.new_context(color_scheme='light')
+        page = context.new_page()
+        page.goto(args.url)
+        toggle = page.get_by_role('switch', name='Dark mode')
+        for theme in ['light', 'dark']:
+            toggle.click()
+            page.reload()
+            expect(page.locator('html')).to_have_attribute('data-theme', theme)
+            expect(toggle).to_have_attribute('aria-checked', str(theme == 'dark').lower())
+        context.close()
+        self.checks.append('theme: dark default on light OS, saved/invalid/unavailable storage, system changes, keyboard activation, both themes persist')
 
     def range(self, draft):
         self.button('Page range').click()
@@ -268,7 +306,11 @@ class Suite:
             assert tuple(document[1].rect)[2:] == (216, 120)
             color = document[0].get_pixmap().pixel(30,30)
             assert color[0] > 220 and color[1] > 220 and color[2] < 30, color
-        self.page.get_by_role('switch').click()
+        toggle = self.page.get_by_role('switch')
+        if toggle.get_attribute('aria-checked') == 'true':
+            toggle.click()
+        expect(self.page.locator('html')).to_have_attribute('data-theme','light')
+        toggle.click()
         expect(self.page.locator('html')).to_have_attribute('data-theme','dark')
         self.page.reload()
         expect(self.page.locator('html')).to_have_attribute('data-theme','dark')
@@ -696,9 +738,53 @@ class Suite:
         expect(self.button('Continue')).to_be_disabled()
         self.checks.append('lifecycle: clear confirmation/cancel, late layout after clear rejected, source deletion and URL revocation, new upload requires explicit finished dimensions')
 
+    def workspace_animation(self):
+        self.fresh()
+        self.page.set_viewport_size({'width': 1366, 'height': 900})
+        self.select(stripe)
+        self.idle()
+        samples = self.button('Impose artwork').evaluate('''button => new Promise(resolve => {
+          const bounds = () => {
+            const r = document.querySelector('.ready-card').getBoundingClientRect();
+            return {x:r.x, y:r.y, width:r.width, height:r.height};
+          };
+          const frames = [bounds()], start = performance.now();
+          button.click();
+          const sample = now => {
+            frames.push(bounds());
+            if (now - start < 650) requestAnimationFrame(sample);
+            else resolve(frames);
+          };
+          requestAnimationFrame(sample);
+        })''')
+        first, last = samples[0], samples[-1]
+        assert first['width'] < last['width'] - 100, samples
+        assert first['height'] < last['height'] - 100, samples
+        assert any(first['width'] + 10 < frame['width'] < last['width'] - 10 for frame in samples), samples
+        assert any(first['height'] + 10 < frame['height'] < last['height'] - 10 for frame in samples), samples
+        assert all(frame['width'] <= last['width'] + 1 for frame in samples), samples
+        assert all(after['width'] >= before['width'] - 1 for before, after in zip(samples, samples[1:])), samples
+        assert abs(last['x']) < 1 and abs(last['width'] - 1366) < 1, last
+        assert abs(last['y'] + last['height'] - 900) < 1, last
+        self.idle()
+        self.page.screenshot(path=str(self.out/'impose-expanded.png'))
+        self.switch('Images to PDF')
+        self.idle()
+        self.page.wait_for_function("!document.querySelector('.elm-shell').hasAttribute('data-workspace-animating')")
+        assert self.page.locator('.ready-card').bounding_box()['width'] < 1366 - 100
+        self.page.emulate_media(reduced_motion='reduce')
+        self.switch('Impose artwork')
+        self.idle()
+        assert self.page.locator('.elm-shell').get_attribute('data-workspace-animating') is None
+        frame = self.page.locator('.ready-card.imposing').bounding_box()
+        assert abs(frame['x']) < 1 and abs(frame['width'] - 1366) < 1, frame
+        self.page.emulate_media(reduced_motion='no-preference')
+        self.checks.append('workspace animation: visible monotonic expansion without overshoot, full viewport bounds, return to centered tool, reduced-motion bypass')
+
     def responsive(self):
         self.fresh()
         self.impose(stripe)
+        self.page.wait_for_function("!document.querySelector('.elm-shell').hasAttribute('data-workspace-animating')")
         viewports=[(1366,900),(1366,560),(1101,768),(1100,768),(1024,768),(881,700),(880,700),(800,900),(540,700),(539,700),(390,700),(320,568)]
         # CI's DejaVu fallback is wider than fonts installed on some desktops.
         # Exercise it at every viewport for step labels and header wrapping.
@@ -708,6 +794,15 @@ class Suite:
             suffix='-dejavu' if font else ''
             self.page.set_viewport_size({'width':width,'height':height})
             self.page.wait_for_timeout(80)
+            frame = self.page.locator('.ready-card.imposing').bounding_box()
+            header = self.page.locator('.app-header').bounding_box()
+            assert abs(frame['x']) < 1 and abs(frame['width'] - width) < 1, (width, height, frame)
+            assert abs(frame['y'] + frame['height'] - height) < 1, (width, height, frame)
+            assert abs(header['x'] - frame['x']) < 1 and abs(header['width'] - frame['width']) < 1, (width, height, header, frame)
+            toggle = self.page.get_by_role('switch', name='Dark mode')
+            bounds = toggle.bounding_box()
+            assert abs(bounds['width'] - 44) < 0.5 and abs(bounds['height'] - 44) < 0.5, (width, height, bounds)
+            assert toggle.evaluate('e => { const r = e.getBoundingClientRect(); return e.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); }'), (width, height, 'Theme switch is clipped')
             if width<=1100:
                 self.page.get_by_role('tab',name='Setup',exact=True).click()
             action=self.button('Continue')
@@ -747,6 +842,16 @@ class Suite:
             box=sheet.bounding_box()
             assert box['width']>80 and box['height']>80,(width,height,box)
             self.page.screenshot(path=str(self.out/f'impose-{width}x{height}{suffix}.png'))
+        self.page.get_by_role('switch', name='Dark mode').click()
+        expect(self.page.locator('html')).to_have_attribute('data-theme', 'light')
+        for width, height in [(1366, 900), (320, 568)]:
+            self.page.set_viewport_size({'width': width, 'height': height})
+            self.page.wait_for_timeout(80)
+            if width <= 1100:
+                self.page.get_by_role('tab', name='Preview', exact=True).click()
+            expect(self.page.locator('.sheet-svg')).to_be_visible()
+            self.page.screenshot(path=str(self.out/f'impose-light-{width}x{height}.png'))
+        self.page.get_by_role('switch', name='Dark mode').click()
         self.page.set_viewport_size({'width':390,'height':700})
         self.switch('Images to PDF')
         expect(self.button('Create PDF')).to_be_visible()
