@@ -64,7 +64,6 @@ init theme =
       , sheet = 0
       , back = False
       , step = 0
-      , reached = 0
       , rail = "setup"
       , collapsed = False
       , chosenWidth = False
@@ -700,8 +699,8 @@ updateInternal msg m =
                 schedule { m | quantityDrafts = drafts, request = withQuantities qs m.request }
 
         SetStep step ->
-            if step <= m.reached then
-                ( { m | step = step, rail = "setup" }, bridge "focus" [ ( "id", E.string ("step-title-" ++ String.fromInt step) ) ] )
+            if step >= 0 && step <= 3 then
+                ( { m | step = step, rail = "setup" }, bridge "focus" [ ( "id", E.string ("setup-tab-" ++ String.fromInt step) ) ] )
 
             else
                 ( m, Cmd.none )
@@ -1442,13 +1441,6 @@ toggle key m =
                         "dark"
             in
             ( { m | theme = theme }, bridge "theme" [ ( "value", E.string theme ) ] )
-
-        "continue" ->
-            if validSetup m && (m.step /= 2 || m.layoutReady) then
-                ( { m | step = min 3 (m.step + 1), reached = max m.reached (min 3 (m.step + 1)) }, bridge "focus" [ ( "id", E.string ("step-title-" ++ String.fromInt (min 3 (m.step + 1))) ) ] )
-
-            else
-                ( m, Cmd.none )
 
         "collapse" ->
             ( { m | collapsed = not m.collapsed }, Cmd.none )

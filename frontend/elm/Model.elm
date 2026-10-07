@@ -57,7 +57,6 @@ type alias Model =
     , sheet : Int
     , back : Bool
     , step : Int
-    , reached : Int
     , rail : String
     , collapsed : Bool
     , chosenWidth : Bool

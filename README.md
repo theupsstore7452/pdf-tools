@@ -50,10 +50,12 @@ quantities. Presets can be created, renamed, updated, applied, or deleted.
 Artwork is a workspace-level global context exposed through the compact
 **Artwork** toolbar beside the sheet preview, not a separate Setup step. **Fit**,
 **Fill**, **Stretch**, and impression orientation stay available as you move
-through the four-step Size, Quantity & sheet, Arrangement, and Bleed walkthrough. Open the
+between the Size, Quantity & sheet, Arrangement, and Bleed tabs. All four tabs
+are available immediately, including while settings are incomplete or a preview
+is loading. Use the arrow keys, Home, or End to navigate the tabs. Open the
 Artwork disclosure when you need fitting controls, crop positioning, per-artwork
 overrides, or source and bleed information. On narrow screens, the toolbar stays
-outside the guided Setup rail while **Preview** remains focused on inspecting the
+outside the Setup panel while **Preview** remains focused on inspecting the
 sheet.
 
 Mixed-size PDF pages and images can share one manually defined finished size.
