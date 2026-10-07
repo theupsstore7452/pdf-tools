@@ -19,10 +19,13 @@ fitting, and margins belong to other workflows.
 
 ## Make customer artwork into a print-ready flyer
 
-Choose **Impose artwork**, then explicitly set the **Finished width** and
-**Finished height** the customer wants. These fields are always editable. PDFs
-and images both require an explicit choice; source dimensions never establish
-the intended product size.
+Choose **Impose artwork**. **Finished width** and **Finished height** automatically
+start at the original dimensions of the first artwork page: a 5×7-inch PDF starts
+at 5×7 inches. Images use their detected physical size, with 300 DPI assumed when
+needed. These fields are always editable. Replacing artwork updates the default
+size until you edit it, choose a finished orientation, or apply a saved setup;
+those choices are retained when artwork changes. Mixed-size artwork shares the
+first page's default finished size.
 
 - **Fit** preserves proportions and content, with white borders
   where the source and finished shapes differ.

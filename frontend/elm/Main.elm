@@ -68,6 +68,7 @@ init theme =
       , collapsed = False
       , chosenWidth = False
       , chosenHeight = False
+      , autoFinishedSize = True
       , drafts = Dict.empty
       , quantityDrafts = Dict.empty
       , repeatSingle = []
@@ -879,6 +880,27 @@ updateInternal msg m =
                             r =
                                 I.bindSource source m.request
 
+                            autoWidth =
+                                m.autoFinishedSize || (not m.chosenWidth && not (Dict.member "finished-width" m.drafts))
+
+                            autoHeight =
+                                m.autoFinishedSize || (not m.chosenHeight && not (Dict.member "finished-height" m.drafts))
+
+                            size =
+                                { width =
+                                    if autoWidth then
+                                        source.analysis.sourcePdfSize.width
+
+                                    else
+                                        r.finishedCutSize.width
+                                , height =
+                                    if autoHeight then
+                                        source.analysis.sourcePdfSize.height
+
+                                    else
+                                        r.finishedCutSize.height
+                                }
+
                             next =
                                 { m
                                     | files =
@@ -889,7 +911,9 @@ updateInternal msg m =
                                             m.pending
                                     , pending = []
                                     , source = Just source
-                                    , request = r
+                                    , request = { r | finishedCutSize = size }
+                                    , chosenWidth = m.chosenWidth || autoWidth
+                                    , chosenHeight = m.chosenHeight || autoHeight
                                     , busy = False
                                     , error = ""
                                     , job = Nothing
@@ -1010,6 +1034,7 @@ updateInternal msg m =
                             , drafts = Dict.empty
                             , chosenWidth = True
                             , chosenHeight = True
+                            , autoFinishedSize = False
                             , error = ""
                             , editingPreset =
                                 if p.builtIn then
@@ -1031,7 +1056,7 @@ updateInternal msg m =
             in
             case ( saved, m.source ) of
                 ( Just r, Just source ) ->
-                    schedule { m | request = I.bindSource source { r | sourceId = Nothing }, drafts = Dict.empty, quantityDrafts = Dict.empty, chosenWidth = True, chosenHeight = True, sheet = 0 }
+                    schedule { m | request = I.bindSource source { r | sourceId = Nothing }, drafts = Dict.empty, quantityDrafts = Dict.empty, chosenWidth = True, chosenHeight = True, autoFinishedSize = False, sheet = 0 }
 
                 _ ->
                     ( { m | error = "Choose artwork before restoring a saved setup." }, Cmd.none )
@@ -1148,7 +1173,7 @@ field key value m =
                         else
                             { width = shorter, height = longer }
                 in
-                schedule { m | request = { r | finishedCutSize = next }, drafts = Dict.remove "finished-width" (Dict.remove "finished-height" m.drafts) }
+                schedule { m | request = { r | finishedCutSize = next }, drafts = Dict.remove "finished-width" (Dict.remove "finished-height" m.drafts), autoFinishedSize = False }
 
             else
                 ( m, Cmd.none )
@@ -1415,7 +1440,7 @@ field key value m =
             schedule { m | request = { r | manual = Just { manual | rotationDegrees = String.toInt value |> Maybe.withDefault 0 } } }
 
         _ ->
-            setNumber key value m
+            setNumber key value { m | autoFinishedSize = m.autoFinishedSize && not (List.member key [ "finished-width", "finished-height" ]) }
 
 
 toggle : String -> Model -> ( Model, Cmd Msg )

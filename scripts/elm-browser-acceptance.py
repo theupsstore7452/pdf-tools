@@ -18,7 +18,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--url', default='http://127.0.0.1:3210')
 parser.add_argument('--browsers', default='chromium,firefox')
 parser.add_argument('--output', default='/tmp/pdf-elm-acceptance')
-parser.add_argument('--checks', default='theme,general,workspace_animation,recovery,intake_and_keyboard,setup_tabs,fitting,mixed_and_saved,preview_recovery,lifecycle,responsive,startup')
+parser.add_argument('--checks', default='theme,general,workspace_animation,recovery,intake_and_keyboard,finished_size_defaults,setup_tabs,fitting,mixed_and_saved,preview_recovery,lifecycle,responsive,startup')
 args = parser.parse_args()
 root = pathlib.Path(args.output)
 root.mkdir(parents=True, exist_ok=True)
@@ -42,6 +42,7 @@ def pdf(name, labels, sizes=None):
 three = pdf('three.pdf', ['PAGE-1', 'PAGE-2', 'PAGE-3'])
 a_pdf = pdf('a.pdf', ['FIRST'])
 b_pdf = pdf('b.pdf', ['SECOND'], [(288, 216)])
+five_by_seven = pdf('five-by-seven.pdf', ['5x7 ART'], [(360, 504)])
 six = pdf('mixed.pdf', [f'ART-{n}' for n in range(1, 7)], [(216, 144), (288, 216), (252, 180), (216, 144), (288, 216), (252, 180)])
 corrupt = fixtures / 'corrupt.pdf'
 corrupt.write_bytes(b'%PDF-1.7\nnot a readable PDF')
@@ -393,8 +394,9 @@ class Suite:
         # Multiple input formats use the canonical mixed-source path.
         self.select([a_pdf,stripe,small_jpeg])
         self.idle()
-        expect(self.page.locator('#finished-width')).to_have_value('')
-        expect(self.page.get_by_label('Finished orientation',exact=True)).to_be_disabled()
+        expect(self.page.locator('#finished-width')).to_have_value('3')
+        expect(self.page.locator('#finished-height')).to_have_value('2')
+        expect(self.page.get_by_label('Finished orientation',exact=True)).to_be_enabled()
         self.page.locator('#finished-width').fill('3')
         self.page.locator('#finished-height').fill('2')
         self.page.get_by_label('Finished orientation',exact=True).select_option('portrait')
@@ -418,7 +420,41 @@ class Suite:
             cut=self.layouts[-1]['placements'][1]
             color=pix.pixel(round((cut['finishedX']+cut['finishedWidth']/2)*72),round((cut['finishedY']+cut['finishedHeight']/2)*72))
             assert color[0]>220 and color[1]>220 and color[2]<30,color
-        self.checks.append('intake/keyboard: native file drops and append, keyboard/pointer ordering + stable focus, dialog Escape focus, mixed PDF/PNG/JPEG preparation/reorder/remove/output, explicit dimensions and finished orientation')
+        self.checks.append('intake/keyboard: native file drops and append, keyboard/pointer ordering + stable focus, dialog Escape focus, mixed PDF/PNG/JPEG preparation/reorder/remove/output, automatic dimensions and finished orientation')
+
+    def finished_size_defaults(self):
+        self.fresh()
+        self.select(five_by_seven)
+        self.idle()
+        self.switch('Impose artwork')
+        self.idle()
+        expect(self.page.locator('#finished-width')).to_have_value('5')
+        expect(self.page.locator('#finished-height')).to_have_value('7')
+        expect(self.page.get_by_label('Finished orientation', exact=True)).to_have_value('portrait')
+        assert self.layouts[-1]['finishedCutSize'] == {'width': 5, 'height': 7}
+        self.step('Bleed')
+        path = self.download('Download imposed PDF', 'autofilled-5x7.pdf')
+        with fitz.open(path) as document:
+            assert '5x7 ART' in document[0].get_text()
+        self.step('Size')
+        self.select(b_pdf)
+        self.idle()
+        expect(self.page.locator('#finished-width')).to_have_value('4')
+        expect(self.page.locator('#finished-height')).to_have_value('3')
+        self.page.locator('#finished-width').fill('3.5')
+        self.page.locator('#finished-height').fill('2')
+        self.select(five_by_seven)
+        self.idle()
+        expect(self.page.locator('#finished-width')).to_have_value('3.5')
+        expect(self.page.locator('#finished-height')).to_have_value('2')
+        self.fresh()
+        self.select(stripe)
+        self.idle()
+        self.switch('Impose artwork')
+        self.idle()
+        expect(self.page.locator('#finished-width')).to_have_value('3')
+        assert abs(float(self.page.locator('#finished-height').input_value()) - 500 / 300) < .0001
+        self.checks.append('finished-size defaults: 5x7 PDF autofill + export, original portrait orientation, replacement updates untouched defaults, manual edits retained, image dimensions at 300 DPI')
 
     def setup_tabs(self):
         self.fresh()
@@ -783,9 +819,10 @@ class Suite:
         self.idle()
         self.switch('Impose artwork')
         self.page.locator('#finished-width').wait_for(timeout=60000)
-        expect(self.page.locator('#finished-width')).to_have_value('')
+        expect(self.page.locator('#finished-width')).to_have_value('3')
+        expect(self.page.locator('#finished-height')).to_have_value('2')
         expect(self.button('Continue')).to_be_enabled()
-        self.checks.append('lifecycle: clear confirmation/cancel, late layout after clear rejected, source deletion and URL revocation, new upload requires explicit finished dimensions')
+        self.checks.append('lifecycle: clear confirmation/cancel, late layout after clear rejected, source deletion and URL revocation, new upload initializes original finished dimensions')
 
     def workspace_animation(self):
         self.fresh()

@@ -61,6 +61,7 @@ type alias Model =
     , collapsed : Bool
     , chosenWidth : Bool
     , chosenHeight : Bool
+    , autoFinishedSize : Bool
     , drafts : Dict String String
     , quantityDrafts : Dict Int String
     , repeatSingle : List Int
