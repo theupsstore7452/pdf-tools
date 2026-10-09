@@ -57,11 +57,11 @@ type alias Model =
     , sheet : Int
     , back : Bool
     , step : Int
-    , reached : Int
     , rail : String
     , collapsed : Bool
     , chosenWidth : Bool
     , chosenHeight : Bool
+    , autoFinishedSize : Bool
     , drafts : Dict String String
     , quantityDrafts : Dict Int String
     , repeatSingle : List Int

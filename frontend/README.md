@@ -32,8 +32,9 @@ and status lines stay text, and `PDFPV001` preview batches stay binary.
 
 ## Ownership and recovery
 
-Elm maintains transactional selected/pending files, explicit finished-size
-choices, separate simplex/duplex quantity drafts, and layout revision identities.
+Elm maintains transactional selected/pending files, source-derived finished-size
+defaults and user overrides, separate simplex/duplex quantity drafts, and layout
+revision identities.
 Inspection, prepared jobs, layouts, previews, and downloads reject obsolete
 responses after cancellation or replacement. Failed replacement leaves committed
 files and settings available. Applying a preset preserves artwork and quantity

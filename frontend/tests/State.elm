@@ -29,10 +29,15 @@ layout =
     RustWire.cases |> List.filter (\( name, _ ) -> name == "LayoutResult") |> List.head |> Maybe.andThen (Tuple.second >> D.decodeString A.layoutResultDecoder >> Result.toMaybe)
 
 
+source : Maybe A.PreparedSourceResponse
+source =
+    RustWire.cases |> List.filter (\( name, _ ) -> name == "PreparedSourceResponse") |> List.head |> Maybe.andThen (Tuple.second >> D.decodeString A.preparedSourceResponseDecoder >> Result.toMaybe)
+
+
 tests : Test
 tests =
     describe "Validation and workspace transitions"
-        [ test "Explicit finished choices are required even when the displayed defaults match"
+        [ test "Finished size requires source preparation or entered dimensions"
             (\_ ->
                 let
                     width =
@@ -42,6 +47,48 @@ tests =
                         step (Field "finished-height" "2") width
                 in
                 Expect.equal [ False, True, False, True ] [ initial.chosenWidth, width.chosenWidth, width.chosenHeight, Main.validSetup both ]
+            )
+        , test "Prepared artwork initializes finished dimensions and refreshes untouched defaults"
+            (\_ ->
+                case source of
+                    Nothing ->
+                        Expect.fail "Missing Rust prepared-source contract"
+
+                    Just prepared ->
+                        let
+                            analysis =
+                                prepared.analysis
+
+                            first =
+                                step (Prepared 0 (Ok { prepared | analysis = { analysis | sourcePdfSize = { width = 5, height = 7 } } })) initial
+
+                            replaced =
+                                step (Prepared 0 (Ok prepared)) first
+                        in
+                        Expect.equal
+                            ( ( { width = 5, height = 7 }, True ), ( prepared.analysis.sourcePdfSize, True ) )
+                            ( ( first.request.finishedCutSize, Main.validSetup first ), ( replaced.request.finishedCutSize, Main.validSetup replaced ) )
+            )
+        , test "Preparing replacement artwork retains edited dimensions and invalid drafts"
+            (\_ ->
+                case source of
+                    Nothing ->
+                        Expect.fail "Missing Rust prepared-source contract"
+
+                    Just prepared ->
+                        let
+                            edited =
+                                step (Prepared 0 (Ok prepared)) initial |> step (Field "finished-width" "5") |> step (Field "finished-height" "7")
+
+                            replaced =
+                                step (Prepared 0 (Ok prepared)) edited
+
+                            invalid =
+                                edited |> step (Field "finished-width" "4.") |> step (Prepared 0 (Ok prepared))
+                        in
+                        Expect.equal
+                            ( ( { width = 5, height = 7 }, False ), ( Just "4.", False ) )
+                            ( ( replaced.request.finishedCutSize, replaced.autoFinishedSize ), ( Dict.get "finished-width" invalid.drafts, Main.validSetup invalid ) )
             )
         , test "Decimal drafts keep 4. intact and recover as 4.25"
             (\_ ->

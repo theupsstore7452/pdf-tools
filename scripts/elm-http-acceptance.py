@@ -43,7 +43,7 @@ with sync_playwright() as pw:
         page.locator('.sheet-svg image').first.wait_for(timeout=60000)
         for step in ['Quantity & sheet','Arrangement','Bleed']:
             page.get_by_role('button',name='Continue',exact=True).click()
-            expect(page.locator('.setup-stepper button[aria-current=step]')).to_have_text(step)
+            expect(page.locator('.setup-stepper button[aria-selected=true]')).to_have_text(step)
         with page.expect_download(timeout=60000) as download:
             page.get_by_role('button',name='Download imposed PDF',exact=True).click()
         with fitz.open(download.value.path()) as result:

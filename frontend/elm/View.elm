@@ -570,6 +570,29 @@ imposeView m =
         ]
 
 
+setupTabKey : Int -> D.Decoder ( Msg, Bool )
+setupTabKey index =
+    D.field "key" D.string
+        |> D.andThen
+            (\key ->
+                case key of
+                    "ArrowRight" ->
+                        D.succeed ( SetStep (modBy 4 (index + 1)), True )
+
+                    "ArrowLeft" ->
+                        D.succeed ( SetStep (modBy 4 (index - 1)), True )
+
+                    "Home" ->
+                        D.succeed ( SetStep 0, True )
+
+                    "End" ->
+                        D.succeed ( SetStep 3, True )
+
+                    _ ->
+                        D.fail "Not a setup tab navigation key"
+            )
+
+
 setupView : Model -> Html Msg
 setupView m =
     let
@@ -759,22 +782,32 @@ setupView m =
                     ]
     in
     section [ id "gang-setup-panel", class "gang-panel gang-setup elm-setup", attribute "aria-label" "Print setup" ]
-        [ nav [ class "setup-stepper", attribute "aria-label" "Print setup progress" ]
-            [ ol []
+        [ nav [ class "setup-stepper", attribute "aria-label" "Print setup" ]
+            [ ol [ attribute "role" "tablist", attribute "aria-label" "Print setup options" ]
                 (List.indexedMap
                     (\i t ->
-                        li []
+                        li [ attribute "role" "presentation" ]
                             [ button
                                 [ type_ "button"
-                                , attribute "aria-current"
+                                , id ("setup-tab-" ++ String.fromInt i)
+                                , attribute "role" "tab"
+                                , attribute "aria-controls" "setup-tab-panel"
+                                , attribute "aria-selected"
                                     (if i == m.step then
-                                        "step"
+                                        "true"
 
                                      else
                                         "false"
                                     )
-                                , disabled (i > m.reached)
+                                , tabindex
+                                    (if i == m.step then
+                                        0
+
+                                     else
+                                        -1
+                                    )
                                 , onClick (SetStep i)
+                                , preventDefaultOn "keydown" (setupTabKey i)
                                 ]
                                 [ span [ class "setup-step-label" ] [ text t ] ]
                             ]
@@ -782,7 +815,7 @@ setupView m =
                     [ "Size", "Quantity & sheet", "Arrangement", "Bleed" ]
                 )
             ]
-        , fieldset [ class "gang-setup-fields", disabled m.busy ] [ div [ class "setup-step-panel" ] (h3 [ id ("step-title-" ++ String.fromInt m.step), tabindex -1, class "visually-hidden" ] [ text title ] :: controls) ]
+        , fieldset [ class "gang-setup-fields", disabled m.busy ] [ div [ id "setup-tab-panel", class "setup-step-panel", attribute "role" "tabpanel", attribute "aria-labelledby" ("setup-tab-" ++ String.fromInt m.step), tabindex 0 ] (h3 [ class "visually-hidden" ] [ text title ] :: controls) ]
         , div [ class "setup-step-actions elm-setup-actions" ]
             [ if m.step > 0 then
                 btn "Back" (SetStep (m.step - 1))
@@ -790,7 +823,7 @@ setupView m =
               else
                 text ""
             , if m.step < 3 then
-                primary "Continue" (Toggle "continue") (not (setupValid m) || m.busy || (m.step == 2 && not m.layoutReady))
+                primary "Continue" (SetStep (m.step + 1)) False
 
               else
                 primary "Download imposed PDF" Submit (not (setupValid m) || m.busy || not m.layoutReady)
@@ -880,8 +913,8 @@ toolbarView m =
                 "Hide setup toolbar"
             )
             (Toggle "collapse")
-        , details [ class "elm-artwork-menu" ]
-            [ summary [] [ text "Artwork" ]
+        , details [ class "elm-artwork-menu artwork-toolbar-disclosure" ]
+            [ summary [ class "ghost-button" ] [ text "Artwork" ]
             , fieldset [ disabled m.busy ]
                 [ choices "Artwork fitting"
                     "fit"

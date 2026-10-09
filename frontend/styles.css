@@ -3040,14 +3040,10 @@ input[aria-invalid="true"] {
   outline-offset: 1px;
 }
 
-.setup-stepper button[aria-current="step"] {
+.setup-stepper button[aria-selected="true"] {
   color: var(--text-strong);
   background: var(--accent-soft);
   box-shadow: inset 0 -2px var(--accent);
-}
-
-.setup-stepper li.reached button {
-  color: var(--text-ui);
 }
 
 .setup-step-label {
@@ -3059,13 +3055,8 @@ input[aria-invalid="true"] {
   overflow-wrap: anywhere;
 }
 
-.setup-stepper button[aria-current="step"] .setup-step-label {
+.setup-stepper button[aria-selected="true"] .setup-step-label {
   font-weight: 800;
-}
-
-.setup-stepper button:disabled {
-  cursor: not-allowed;
-  opacity: 0.48;
 }
 
 @media (prefers-reduced-motion: reduce) {
