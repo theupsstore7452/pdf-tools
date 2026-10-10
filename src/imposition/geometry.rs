@@ -86,12 +86,45 @@ pub(crate) fn source_page_geometry_with_bleed(
         .as_ref()
         .map(|object| page_box_points(document, object))
         .transpose()?;
-    let trim_points = trim_object
+    let mut trim_points = trim_object
         .as_ref()
         .map(|object| page_box_points(document, object))
         .transpose()?;
     let rotation = optional_page_integer(document, page_id, b"Rotate", 0)?.rem_euclid(360);
     let user_unit = optional_page_number(document, page_id, b"UserUnit", 1.0)?;
+    // A PDF without a cut box can still carry a common finished size plus a
+    // uniform bleed. Resolve that boundary once so analysis, previews, fitting,
+    // and export all use the same unscaled cut. Raster pages have assumed
+    // physical dimensions and must retain their complete image boundary.
+    let assumed_image = document
+        .get_dictionary(page_id)
+        .ok()
+        .and_then(|page| page.get(b"PdfToolsAssumedPhysicalSize").ok())
+        .and_then(|value| value.as_bool().ok())
+        .unwrap_or(false);
+    if trim_points.is_none()
+        && source_bleed_override.is_none()
+        && !assumed_image
+        && user_unit.is_finite()
+        && user_unit > 0.0
+        && !crop_points
+            .zip(media_points)
+            .is_some_and(|(crop, media)| !same_points(crop, media))
+    {
+        if let Some(bounds) = crop_points.or(media_points) {
+            let source = SizeInches {
+                width: (bounds[2] - bounds[0]) * user_unit / PT_PER_IN,
+                height: (bounds[3] - bounds[1]) * user_unit / PT_PER_IN,
+            };
+            let (_, _, detected) = super::pdf::detect_finished_size_and_bleed(source, None, &[]);
+            if detected.detected {
+                trim_points = Some(inset_box(
+                    bounds,
+                    detected.amount_per_side * PT_PER_IN / user_unit,
+                )?);
+            }
+        }
+    }
     source_page_geometry_from_parts(
         PageGeometryParts {
             media: media_points,
@@ -567,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn omitted_trim_box_matches_an_explicit_crop_sized_trim_box() {
+    fn inferred_cut_does_not_override_an_explicit_full_page_trim_box() {
         let mut document = LoDocument::with_version("1.7");
         let rotated = document.add_object(dictionary! {
             "Type" => "Page",
@@ -583,11 +616,11 @@ mod tests {
         let rotated = source_page_geometry(&document, rotated).unwrap();
         let unrotated = source_page_geometry(&document, unrotated).unwrap();
 
-        assert!(same_imposition_geometry(&rotated, &unrotated, 0.01));
+        assert!(!same_imposition_geometry(&rotated, &unrotated, 0.01));
     }
 
     #[test]
-    fn omitted_trim_box_does_not_match_a_genuinely_inset_trim_box() {
+    fn inferred_common_cut_matches_an_explicit_inset_trim_box() {
         let mut document = LoDocument::with_version("1.7");
         let full_page = document.add_object(dictionary! {
             "Type" => "Page",
@@ -602,7 +635,7 @@ mod tests {
         let full_page = source_page_geometry(&document, full_page).unwrap();
         let inset_trim = source_page_geometry(&document, inset_trim).unwrap();
 
-        assert!(!same_imposition_geometry(&full_page, &inset_trim, 0.01));
+        assert!(same_imposition_geometry(&full_page, &inset_trim, 0.01));
     }
 
     #[test]
