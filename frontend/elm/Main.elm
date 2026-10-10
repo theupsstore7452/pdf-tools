@@ -886,16 +886,19 @@ updateInternal msg m =
                             autoHeight =
                                 m.autoFinishedSize || (not m.chosenHeight && not (Dict.member "finished-height" m.drafts))
 
+                            detectedSize =
+                                I.detectedFinishedSize source.analysis
+
                             size =
                                 { width =
                                     if autoWidth then
-                                        source.analysis.sourcePdfSize.width
+                                        detectedSize.width
 
                                     else
                                         r.finishedCutSize.width
                                 , height =
                                     if autoHeight then
-                                        source.analysis.sourcePdfSize.height
+                                        detectedSize.height
 
                                     else
                                         r.finishedCutSize.height

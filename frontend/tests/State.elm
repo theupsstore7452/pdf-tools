@@ -60,14 +60,64 @@ tests =
                                 prepared.analysis
 
                             first =
-                                step (Prepared 0 (Ok { prepared | analysis = { analysis | sourcePdfSize = { width = 5, height = 7 } } })) initial
+                                step (Prepared 0 (Ok { prepared | analysis = { analysis | sourcePdfSize = { width = 5, height = 7 }, trimBox = Nothing, suggestedFinishedCutSize = Nothing } })) initial
 
                             replaced =
                                 step (Prepared 0 (Ok prepared)) first
                         in
                         Expect.equal
-                            ( ( { width = 5, height = 7 }, True ), ( prepared.analysis.sourcePdfSize, True ) )
+                            ( ( { width = 5, height = 7 }, True ), ( I.detectedFinishedSize prepared.analysis, True ) )
                             ( ( first.request.finishedCutSize, Main.validSetup first ), ( replaced.request.finishedCutSize, Main.validSetup replaced ) )
+            )
+        , test "Finished defaults prefer the cut box, then detected cut, then full artwork"
+            (\_ ->
+                case source of
+                    Nothing ->
+                        Expect.fail "Missing Rust prepared-source contract"
+
+                    Just prepared ->
+                        let
+                            analysis =
+                                prepared.analysis
+
+                            trim =
+                                { left = 0.125, bottom = 0.125, right = 5.125, top = 7.125, width = 5, height = 7 }
+
+                            inferred =
+                                { analysis | sourcePdfSize = { width = 5.25, height = 7.25 }, trimBox = Nothing, suggestedFinishedCutSize = Just { width = 5, height = 7 }, sourcePages = [] }
+
+                            withTrim =
+                                { inferred | trimBox = Just trim, suggestedFinishedCutSize = Just { width = 4, height = 6 } }
+
+                            full =
+                                { inferred | suggestedFinishedCutSize = Nothing }
+
+                            sizes =
+                                List.map (\a -> (step (Prepared 0 (Ok { prepared | analysis = a })) initial).request.finishedCutSize) [ withTrim, inferred, full ]
+                        in
+                        Expect.equal [ { width = 5, height = 7 }, { width = 5, height = 7 }, { width = 5.25, height = 7.25 } ] sizes
+            )
+        , test "Images matching a common cut plus bleed retain their full 300 DPI size"
+            (\_ ->
+                case source of
+                    Nothing ->
+                        Expect.fail "Missing Rust prepared-source contract"
+
+                    Just prepared ->
+                        let
+                            analysis =
+                                prepared.analysis
+
+                            size =
+                                { width = 3.75, height = 2.25 }
+
+                            image =
+                                { sourcePdfSize = size, sourceTrimBox = Nothing, previewBox = Nothing, physicalSizeAssumed = True, filename = Just "card.png", originalPageNumber = Just 1 }
+
+                            next =
+                                step (Prepared 0 (Ok { prepared | analysis = { analysis | sourcePdfSize = size, trimBox = Nothing, suggestedFinishedCutSize = Just { width = 3.5, height = 2 }, sourcePages = [ image ] } })) initial
+                        in
+                        Expect.equal size next.request.finishedCutSize
             )
         , test "Preparing replacement artwork retains edited dimensions and invalid drafts"
             (\_ ->

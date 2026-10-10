@@ -1,4 +1,4 @@
-module Imposition exposing (applyPreset, bindSource, initial, pageNumber, pagesForSheet, quantities, setMode, setSides, summary)
+module Imposition exposing (applyPreset, bindSource, detectedFinishedSize, initial, pageNumber, pagesForSheet, quantities, setMode, setSides, summary)
 
 import Api.Generated as A
 
@@ -28,6 +28,20 @@ initial =
     , gutter = { horizontal = 0.299, vertical = 0.299 }
     , manual = Nothing
     }
+
+
+detectedFinishedSize : A.PdfAnalysis -> A.SizeInches
+detectedFinishedSize analysis =
+    case analysis.trimBox of
+        Just trim ->
+            { width = trim.width, height = trim.height }
+
+        Nothing ->
+            if List.head analysis.sourcePages |> Maybe.map .physicalSizeAssumed |> Maybe.withDefault False then
+                analysis.sourcePdfSize
+
+            else
+                Maybe.withDefault analysis.sourcePdfSize analysis.suggestedFinishedCutSize
 
 
 bindSource : A.PreparedSourceResponse -> A.LayoutRequest -> A.LayoutRequest

@@ -247,8 +247,28 @@ fn analyze_loaded(
     let bleed_box = first_geometry.bleed_box;
     let trim_box = first_geometry.trim_box;
     report(&progress, 88, "Detecting trim size and bleed")?;
-    let (matched_preset_id, suggested_finished_cut_size, likely_bleed) =
-        detect_finished_size_and_bleed(source_pdf_size, trim_box.as_ref(), &presets);
+    let explicit_cut = trim_box.as_ref().or_else(|| {
+        crop_box
+            .as_ref()
+            .filter(|crop| media_box.as_ref().is_some_and(|media| media != *crop))
+    });
+    let (matched_preset_id, suggested_finished_cut_size, likely_bleed) = if source_pages[0]
+        .physical_size_assumed
+    {
+        (
+                None,
+                Some(source_pdf_size),
+                BleedDetection {
+                    detected: false,
+                    amount_per_side: 0.0,
+                    horizontal: 0.0,
+                    vertical: 0.0,
+                    notes: vec!["Image physical size is assumed at 300 DPI; bleed requires an explicit cut size.".to_string()],
+                },
+            )
+    } else {
+        detect_finished_size_and_bleed(source_pdf_size, explicit_cut, &presets)
+    };
     let mut warnings = Vec::new();
 
     if !likely_bleed.detected {
@@ -282,7 +302,7 @@ fn inspection_percent(completed: usize, total: usize) -> u8 {
     45 + ((completed * 40) / total.max(1)) as u8
 }
 
-fn detect_finished_size_and_bleed(
+pub(super) fn detect_finished_size_and_bleed(
     source: SizeInches,
     trim_box: Option<&PdfBox>,
     presets: &[GangUpPreset],
@@ -293,29 +313,13 @@ fn detect_finished_size_and_bleed(
             height: round4(trim_box.height),
         };
         let matched = matching_preset(trim_size, presets);
-        if (trim_size.width - source.width).abs() > SIZE_TOLERANCE
-            || (trim_size.height - source.height).abs() > SIZE_TOLERANCE
-        {
-            let bleed = bleed_detection(source, trim_size);
-            return (
-                matched.map(|preset| preset.id.clone()),
-                Some(trim_size),
-                bleed,
-            );
-        }
-        if let Some(preset) = matched {
-            return (
-                Some(preset.id.clone()),
-                Some(trim_size),
-                BleedDetection {
-                    detected: false,
-                    amount_per_side: 0.0,
-                    horizontal: 0.0,
-                    vertical: 0.0,
-                    notes: vec!["Source PDF matches a known finished size.".to_string()],
-                },
-            );
-        }
+        // An explicit cut boundary is authoritative even when it fills the
+        // artwork. Do not reinterpret a custom TrimBox as a common size plus bleed.
+        return (
+            matched.map(|preset| preset.id.clone()),
+            Some(trim_size),
+            bleed_detection(source, trim_size),
+        );
     }
 
     for preset in presets {
@@ -573,6 +577,97 @@ mod tests {
                 height: 7.25
             }
         );
+    }
+
+    #[test]
+    fn explicit_full_page_trim_is_not_reinterpreted_as_common_size_with_bleed() {
+        let source = SizeInches {
+            width: 5.25,
+            height: 7.25,
+        };
+        let trim = PdfBox {
+            left: 0.0,
+            bottom: 0.0,
+            right: source.width,
+            top: source.height,
+            width: source.width,
+            height: source.height,
+        };
+        let (_, finished, bleed) = detect_finished_size_and_bleed(source, Some(&trim), &[]);
+        assert_eq!(finished, Some(source));
+        assert!(!bleed.detected);
+    }
+
+    #[test]
+    fn untagged_pdf_cut_is_shared_by_analysis_and_export_geometry() {
+        let file = staged_pdf("untagged.pdf", &[(5.25, 7.25, 90)], &unique_test_name());
+        let document = LoDocument::load(file.path()).unwrap();
+        let id = *document.get_pages().values().next().unwrap();
+        let geometry = source_page_geometry_with_bleed(&document, id, None).unwrap();
+        assert_eq!(
+            geometry.size,
+            SizeInches {
+                width: 7.25,
+                height: 5.25
+            }
+        );
+        let trim = geometry.trim_box.unwrap();
+        assert_eq!((trim.width, trim.height), (7.0, 5.0));
+        assert_eq!((trim.left, trim.bottom), (0.125, 0.125));
+        let analysis =
+            analyze_pdf_path_structural("untagged.pdf".into(), file.path(), vec![], None).unwrap();
+        assert_eq!(analysis.trim_box, Some(trim));
+        assert_eq!(analysis.source_pages[0].source_trim_box, Some(trim));
+        assert_eq!(
+            analysis.suggested_finished_cut_size,
+            Some(SizeInches {
+                width: 7.0,
+                height: 5.0
+            })
+        );
+    }
+
+    #[test]
+    fn assumed_image_and_explicit_crop_do_not_infer_a_smaller_cut() {
+        let file = staged_pdf("image.pdf", &[(3.75, 2.25, 0)], &unique_test_name());
+        let mut document = LoDocument::load(file.path()).unwrap();
+        let id = *document.get_pages().values().next().unwrap();
+        document
+            .get_dictionary_mut(id)
+            .unwrap()
+            .set("PdfToolsAssumedPhysicalSize", true);
+        assert!(source_page_geometry_with_bleed(&document, id, None)
+            .unwrap()
+            .trim_box
+            .is_none());
+        document.save(file.path()).unwrap();
+        let analysis =
+            analyze_pdf_path_structural("image.pdf".into(), file.path(), vec![], None).unwrap();
+        assert!(!analysis.likely_bleed.detected);
+        assert_eq!(
+            analysis.suggested_finished_cut_size,
+            Some(SizeInches {
+                width: 3.75,
+                height: 2.25
+            })
+        );
+        document
+            .get_dictionary_mut(id)
+            .unwrap()
+            .remove(b"PdfToolsAssumedPhysicalSize");
+        document
+            .get_dictionary_mut(id)
+            .unwrap()
+            .set("CropBox", vec![0.into(), 0.into(), 144.into(), 72.into()]);
+        let geometry = source_page_geometry_with_bleed(&document, id, None).unwrap();
+        assert_eq!(
+            geometry.size,
+            SizeInches {
+                width: 2.0,
+                height: 1.0
+            }
+        );
+        assert!(geometry.trim_box.is_none());
     }
 
     #[test]

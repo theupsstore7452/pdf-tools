@@ -30,6 +30,64 @@ fn layout(r: LayoutRequest) -> LayoutResult {
 }
 
 #[test]
+fn letter_bleed_two_up_matches_reference_cut_spacing_in_both_orientations() {
+    for landscape in [false, true] {
+        let (width, height) = if landscape { (11.0, 8.5) } else { (8.5, 11.0) };
+        let r: LayoutRequest = serde_json::from_value(serde_json::json!({
+            "sourcePdfSize":{"width":width + 0.25,"height":height + 0.25},
+            "sourceTrimBox":{"left":0.125,"bottom":0.125,"right":width + 0.125,"top":height + 0.125,"width":width,"height":height},
+            "sourcePageCount":1,"finishedCutSize":{"width":width,"height":height},
+            "parentSheetSize":{"width":12.0,"height":18.0},
+            "quantityRequested":2,"impositionMode":"repeat","impressionQuantities":[2],
+            "sides":"single","layoutMode":"maxPieces","bleedOption":"useAsIs",
+            "gutter":{"horizontal":0.299,"vertical":0.299},
+            "artworkFit":{"mode":"contain"}
+        })).unwrap();
+        let result = layout(r);
+        assert_eq!((result.pieces_per_sheet, result.sheets_required), (2, 1));
+        assert_eq!(result.rotation_degrees, if landscape { 0 } else { 90 });
+        close(result.gutters.vertical, 0.299);
+        for (index, slot) in result.placements.iter().enumerate() {
+            let (artwork, _) = placed_rects(&result.page_plans[0], slot, result.rotation_degrees);
+            close(artwork.x, 0.375);
+            close(artwork.y, 0.2255 + index as f64 * 8.799);
+            close(artwork.width, 11.25);
+            close(artwork.height, 8.75);
+        }
+    }
+}
+
+#[test]
+fn insufficient_cut_gutters_are_expanded_without_overlapping_bleed() {
+    let mut r = request();
+    r.finished_cut_size = SizeInches {
+        width: 3.0,
+        height: 2.0,
+    };
+    r.bleed_option = BleedOption::ScaleToBleed;
+    r.created_bleed_amount = 0.125;
+    r.layout_mode = LayoutMode::Manual;
+    r.manual = Some(ManualLayout {
+        rows: 2,
+        columns: 2,
+        rotation_degrees: 0,
+        margins: None,
+    });
+    let result = layout(r);
+    close(result.gutters.horizontal, 0.25);
+    close(result.gutters.vertical, 0.25);
+    let (_, first) = placed_rects(&result.page_plans[0], &result.placements[0], 0);
+    let (_, right) = placed_rects(&result.page_plans[0], &result.placements[1], 0);
+    let (_, below) = placed_rects(&result.page_plans[0], &result.placements[2], 0);
+    close(first.x + first.width, right.x);
+    close(first.y + first.height, below.y);
+    assert!(result
+        .warnings
+        .iter()
+        .any(|w| w.problem == "Gutter increased to preserve bleed."));
+}
+
+#[test]
 fn odd_aspect_letter_cover_is_uniform_and_predictable() {
     let result = layout(request());
     let plan = &result.page_plans[0];
