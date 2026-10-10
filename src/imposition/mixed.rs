@@ -227,7 +227,7 @@ pub(crate) fn validate_request(request: &LayoutRequest) -> AppResult<()> {
 
 pub(crate) fn generate(request: LayoutRequest) -> AppResult<LayoutResult> {
     let (request, plans) = prepare(request)?;
-    let slot = plans.iter().fold(
+    let mut slot = plans.iter().fold(
         SizeInches {
             width: 0.0,
             height: 0.0,
@@ -241,6 +241,22 @@ pub(crate) fn generate(request: LayoutRequest) -> AppResult<LayoutResult> {
                 .max(plan.finished_cut_size.height + 2.0 * plan.bleed_amount),
         },
     );
+    let largest_cut = plans.iter().fold(
+        SizeInches {
+            width: 0.0,
+            height: 0.0,
+        },
+        |largest, plan| SizeInches {
+            width: largest.width.max(plan.finished_cut_size.width),
+            height: largest.height.max(plan.finished_cut_size.height),
+        },
+    );
+    // Slots include bleed, but the requested gutters measure between finished
+    // cuts. Subtract the reserved edge artwork instead of adding it twice.
+    // Uniform padding keeps this true when the whole grid is quarter-turned.
+    let padding = (slot.width - largest_cut.width).max(slot.height - largest_cut.height);
+    slot.width = largest_cut.width + padding;
+    slot.height = largest_cut.height + padding;
     let mut grid = request.clone();
     grid.source_pages.clear();
     grid.page_overrides.clear();
@@ -251,7 +267,15 @@ pub(crate) fn generate(request: LayoutRequest) -> AppResult<LayoutResult> {
     grid.source_trim_box = None;
     grid.source_bleed_override = None;
     grid.bleed_option = BleedOption::UseAsIs;
+    grid.gutter = GuttersInches {
+        horizontal: (request.gutter.horizontal - padding).max(0.0),
+        vertical: (request.gutter.vertical - padding).max(0.0),
+    };
     let mut result = super::layout::generate_layout(grid)?;
+    result.gutters = GuttersInches {
+        horizontal: request.gutter.horizontal.max(padding),
+        vertical: request.gutter.vertical.max(padding),
+    };
     result.source_pdf_size = request.source_pages[0].source_pdf_size;
     result.source_trim_box = request.source_pages[0].source_trim_box;
     result.source_bleed_override = request.source_bleed_override;
@@ -261,6 +285,15 @@ pub(crate) fn generate(request: LayoutRequest) -> AppResult<LayoutResult> {
         plans.iter().map(|p| p.bleed_amount).fold(0.0, f64::max);
     result.page_plans = plans;
     result.warnings.clear();
+    if (result.columns > 1 && padding - request.gutter.horizontal > 0.0001)
+        || (result.rows > 1 && padding - request.gutter.vertical > 0.0001)
+    {
+        result.warnings.push(ProductionWarning::new(
+            "Gutter increased to preserve bleed.",
+            "The requested gap between finished cuts is too small for the edge artwork.",
+            "The layout reserves enough space to keep neighboring pieces from overlapping.",
+        ));
+    }
     if request.bleed_option == BleedOption::ScaleToBleed {
         result.warnings.push(ProductionWarning::new("Artwork enlarged to add bleed.",
             "Artwork is enlarged uniformly using the same normalized crop position in the bleed frame. More edge content is cut away, and edge landmarks can shift by up to the bleed amount. Contain may retain white borders.",

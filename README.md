@@ -74,6 +74,10 @@ pairs must have matching finished cuts, and odd source counts cannot be paired
 automatically. In **Edit copy quantities**, **Apply to all** commits the entered
 quantity to every page or pair and closes the dialog.
 
+Gutters measure the gap between finished cuts; supplied bleed occupies that gap
+instead of being added to it. The layout increases an insufficient gap to keep
+neighboring pieces from overlapping and reports that adjustment.
+
 ## Quick start with Docker Compose
 
 Install Docker with the Compose plugin. Published images for Linux amd64 and
@@ -257,7 +261,7 @@ python3 scripts/workflow-regressions.py --url http://127.0.0.1:3200
 python3 scripts/elm-http-acceptance.py --port 3200
 ```
 
-The workflow regression matrix runs 43 cases in each browser, covering PDF trim,
+The workflow regression matrix runs 45 cases in each browser, covering PDF trim,
 crop, bleed, rotation and UserUnit metadata; inferred cuts and unscaled export
 landmarks; PNG/JPEG, alpha transparency, EXIF rotation and 300 DPI sizing; merge
 ordering and removal; every raster format/resolution combination; extraction;
@@ -269,6 +273,15 @@ not stop the remaining cases. JSON results, layout records, downloads and
 Playwright traces are retained, with screenshots and DOM snapshots on failure.
 Run a subset with `--checks cuts,duplex` or `--browsers chromium`. Reports default
 to `/tmp/pdf-elm-acceptance/workflows`; use `--output` to change that location.
+
+The checked-in `pdf_examples/before` and `pdf_examples/after` pairs also guard the
+shop's two-up menu workflow: two 8.5×11-inch finished pieces with 0.125-inch bleed
+on a 12×18-inch sheet, using the default 0.299-inch cut-to-cut gutter. The food
+menu rotates a quarter-turn; the wine file already has an 11×8.5-inch cut and
+contains two menu panels per piece. The tests upload each original, export two
+copies, and compare cut positions, every text word and its bounding box, and the
+rendered sheet against its supplied reference. Reference/actual/difference PNGs
+and comparison metrics are retained. Run these alone with `--checks references`.
 
 The full check launches an isolated release server with disposable data and runs
 both browser suites plus insecure-HTTP acceptance in Chromium and Firefox.

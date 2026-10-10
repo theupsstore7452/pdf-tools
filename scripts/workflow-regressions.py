@@ -16,7 +16,7 @@ import traceback
 import zipfile
 
 import fitz
-from PIL import Image
+from PIL import Image, ImageChops, ImageStat
 from playwright.sync_api import expect, sync_playwright
 
 
@@ -447,6 +447,56 @@ class Workflow:
             assert len(doc) == 1
             assert doc[0].get_pixmap().pixel(10, 10)[0] > 240
 
+    def reference_menu(self, source, reference, finished, rotation):
+        self.impose(source)
+        expect(self.page.locator('#finished-width')).to_have_value(str(finished[0]).removesuffix('.0'))
+        expect(self.page.locator('#finished-height')).to_have_value(str(finished[1]).removesuffix('.0'))
+        self.button('Repeat pages').click()
+        self.step('Quantity & sheet')
+        self.page.get_by_label('Copies', exact=True).fill('2')
+        self.idle()
+        self.step('Bleed')
+        output = self.download('Download imposed PDF', 'menu-two-up.pdf')
+        layout = self.layouts[-1]
+        assert layout['parentSheetSize'] == {'width': 12, 'height': 18}
+        assert layout['piecesPerSheet'] == 2 and layout['sheetsRequired'] == 1
+        assert layout['impressionsRequested'] == 2 and layout['totalPiecesProduced'] == 2
+        assert layout['rotationDegrees'] == rotation
+        assert layout['pagePlans'][0]['finishedCutSize'] == dict(zip(('width', 'height'), finished))
+        assert abs(layout['pagePlans'][0]['bleedAmount'] - .125) < .0001
+        expect(self.page.locator('.sheet-svg .piece-cut')).to_have_count(2)
+        for index, cut in enumerate(self.page.locator('.sheet-svg .piece-cut').all()):
+            expected = {'x': .5, 'y': .3505 + index * 8.799, 'width': 11, 'height': 8.5}
+            for key, value in expected.items():
+                assert abs(float(cut.get_attribute(key)) - value) < .0001, (index, key, value)
+        with fitz.open(reference) as expected, fitz.open(output) as actual:
+            assert len(actual) == len(expected) == 1
+            assert tuple(actual[0].rect) == tuple(expected[0].rect) == (0, 0, 864, 1296)
+            wanted_words, actual_words = expected[0].get_text('words'), actual[0].get_text('words')
+            assert len(actual_words) == len(wanted_words)
+            for wanted, got in zip(wanted_words, actual_words):
+                assert got[4] == wanted[4], (got, wanted)
+                assert max(abs(a - b) for a, b in zip(got[:4], wanted[:4])) < .05, (got, wanted)
+            wanted_pix, actual_pix = expected[0].get_pixmap(), actual[0].get_pixmap()
+            wanted_image = Image.frombytes('RGB', (wanted_pix.width, wanted_pix.height), wanted_pix.samples)
+            actual_image = Image.frombytes('RGB', (actual_pix.width, actual_pix.height), actual_pix.samples)
+            difference = ImageChops.difference(wanted_image, actual_image)
+            wanted_image.save(self.output / 'reference.png')
+            actual_image.save(self.output / 'actual.png')
+            difference.save(self.output / 'difference.png')
+            mean_error = sum(ImageStat.Stat(difference).mean) / 3
+            changed = difference.convert('L').point(lambda value: 255 if value > 32 else 0).histogram()[255]
+            changed_fraction = changed / (wanted_pix.width * wanted_pix.height)
+            metrics = {'meanChannelError': mean_error, 'changedPixelFraction': changed_fraction,
+                       'maxChannelError': max(high for low, high in difference.getextrema()),
+                       'textWordsCompared': len(wanted_words), 'reference': str(reference)}
+            (self.output / 'comparison.json').write_text(json.dumps(metrics, indent=2))
+            # Allow small color/rendering differences between PDF producers;
+            # all text coordinates above still have a strict 0.05-point bound.
+            assert mean_error < 2, metrics
+            assert metrics['maxChannelError'] <= 32, metrics
+            assert changed_fraction < .005, metrics
+
     def close(self, failed=False):
         if failed:
             self.page.screenshot(path=str(self.output / 'failure.png'), full_page=True)
@@ -463,7 +513,7 @@ def main():
     parser.add_argument('--url', default='http://127.0.0.1:3001')
     parser.add_argument('--browsers', default='chromium,firefox')
     parser.add_argument('--output', default='/tmp/pdf-elm-acceptance/workflows')
-    parser.add_argument('--checks', default='cuts,images,merge,convert,order,grid,duplex,recovery')
+    parser.add_argument('--checks', default='cuts,images,merge,convert,order,grid,duplex,recovery,references')
     args = parser.parse_args()
     root = pathlib.Path(args.output)
     cuts, pdfs, images = make_fixtures(root / 'fixtures')
@@ -486,6 +536,14 @@ def main():
                           lambda w, e=edge, r=rotate: w.duplex(pdfs, e, r)))
             cases.append(('duplex', f'images-{edge}-rotate-{rotate}',
                           lambda w, e=edge, r=rotate: w.duplex_images(images, e, r)))
+    examples = pathlib.Path(__file__).resolve().parent.parent / 'pdf_examples'
+    for menu, finished, rotation in [('food', (8.5, 11), 90), ('wine', (11, 8.5), 0)]:
+        source = examples / 'before' / f'resize_{menu}_menu.pdf'
+        reference = examples / 'after' / f'resize_{menu}_menu-imp.pdf'
+        if not source.is_file() or not reference.is_file():
+            parser.error(f'Missing reference pair: {source}, {reference}')
+        cases.append(('references', menu + '-letter-two-up',
+                      lambda w, s=source, r=reference, f=finished, a=rotation: w.reference_menu(s, r, f, a)))
     selected = args.checks.split(',')
     unknown = set(selected) - {c[0] for c in cases}
     if unknown:
