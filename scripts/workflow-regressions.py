@@ -267,7 +267,11 @@ class Workflow:
         self.select([f[0] for f in fixtures])
         self.button('Combine PDFs').click()
         self.button('Move third.pdf up').click()
+        self.idle()
+        expect(self.page.locator('.file-meta > span')).to_have_text(['first.pdf', 'third.pdf', 'second.pdf'])
         self.button('Move third.pdf up').press('Enter')
+        self.idle()
+        expect(self.page.locator('.file-meta > span')).to_have_text(['third.pdf', 'first.pdf', 'second.pdf'])
         ordered = [fixtures[2], fixtures[0], fixtures[1]]
         path = self.download('Download PDF', 'merge.pdf')
         self.pdf_output(path, [l for f in ordered for l in f[1]], [s for f in ordered for s in f[2]])
@@ -309,7 +313,11 @@ class Workflow:
     def image_order(self, fixtures):
         self.select([f[0] for f in fixtures[:3]])
         self.button('Move transparent.png up').click()
+        self.idle()
+        expect(self.page.locator('.file-meta > span')).to_have_text(['opaque.png', 'transparent.png', 'opaque.jpg'])
         self.button('Move transparent.png up').press('Enter')
+        self.idle()
+        expect(self.page.locator('.file-meta > span')).to_have_text(['transparent.png', 'opaque.png', 'opaque.jpg'])
         output = self.download('Create PDF', 'ordered-images.pdf')
         with fitz.open(output) as doc:
             assert len(doc) == 3
