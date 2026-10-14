@@ -32,4 +32,4 @@ release:
 
 clean:
     cargo clean
-    rm -rf frontend/dist frontend/elm-stuff frontend/browser/_build
+    rm -rf frontend/dist frontend/elm-stuff

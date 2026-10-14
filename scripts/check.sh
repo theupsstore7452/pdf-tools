@@ -10,6 +10,7 @@ scripts/generate-elm.sh --check
 npm run format:check --prefix frontend
 npm test --prefix frontend
 node --check frontend/bridge.js
+node --check frontend/browser/bootstrap.js
 npm run build --prefix frontend
 cargo build --locked --release --bin pdf-tools-server
 # Launch the actual release server with isolated persistent data. Python tests

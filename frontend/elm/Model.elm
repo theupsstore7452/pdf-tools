@@ -130,7 +130,6 @@ type Msg
     | LayoutDue Int
     | LaidOut Int (Result Http.Error A.LayoutResult)
     | BrowserEvent D.Value
-    | SharedBrowserResponse D.Value
     | Navigate Int Bool
     | Lease Time.Posix
     | Catalog String (Result Http.Error D.Value)

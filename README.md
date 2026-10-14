@@ -1,8 +1,8 @@
 # PDF Tools
 
 PDF Tools is a self-hosted web app with a Rust backend and Elm frontend, started
-in the browser by a JavaScript bootstrap bundled with this repository. It
-turns PDF pages into PNG or JPEG images, extracts selected pages as individual
+in the browser by a small plain JavaScript bootstrap. It turns PDF pages into
+PNG or JPEG images, extracts selected pages as individual
 PDFs in a ZIP, merges PDFs, converts ordered PNG or JPEG images into a PDF, and
 imposes artwork onto print sheets.
 
@@ -119,8 +119,8 @@ release attachment pins that release's immutable image digest. If using the Comp
 from the repository instead, `PDF_APP_VERSION` defaults to `0.2.18` and can be set
 in `.env` to select another published version.
 
-To build locally instead, clone <https://github.com/theupsstore7452/pdf-tools>,
-enter its repository root, and run:
+To build locally instead, clone <https://github.com/theupsstore7452/pdf-tools>
+and enter its repository root, then run:
 
 ```sh
 docker compose up -d --build --wait
@@ -279,7 +279,8 @@ frontend uses relative API URLs and works on ordinary HTTP origins without
 
 Elm owns workflow state, files, HTTP uploads, validation, polling, and stale
 response rejection. The [JavaScript bootstrap](frontend/browser/bootstrap.js)
-mounts the app and handles theme storage. The [PDF browser adapter](frontend/bridge.js) manages
+mounts the app and checks its resource ports. The
+[PDF browser adapter](frontend/bridge.js) handles theme storage and manages
 binary preview blobs, object URLs, downloads, native dialog focus, and
 crop pointer events. Rust remains authoritative for production geometry. See
 [frontend implementation notes](frontend/README.md) for resource lifecycles and

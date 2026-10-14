@@ -1,6 +1,6 @@
 @layer app {
 :root {
-  --workspace-duration: 480ms;
+  --workspace-duration: 320ms;
   --workspace-easing: cubic-bezier(0.22, 1, 0.36, 1);
   color-scheme: light;
   --bg: #f7f7f7;
@@ -166,6 +166,7 @@ p {
 
 .shell {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   width: min(1680px, calc(100vw - 24px));
   height: 100dvh;
@@ -517,6 +518,7 @@ p {
 
 .ready-shell {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   place-items: stretch;
@@ -524,6 +526,7 @@ p {
 }
 
 .ready-shell.generic-ready {
+  height: auto;
   align-items: start;
   justify-items: center;
 }
@@ -532,6 +535,7 @@ p {
   position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   width: 100%;
   height: 100%;
   max-height: 100%;
@@ -1343,17 +1347,22 @@ body:has(.ready-card.imposing),
   margin-bottom: 0;
   border-width: 0 0 1px;
   border-radius: 0;
-  padding: 10px 20px;
+  padding: 10px 12px;
   box-shadow: none;
 }
 
 .shell.elm-shell[data-workspace-animating] {
   grid-template-rows: var(--workspace-rows);
+  grid-template-columns: var(--workspace-columns);
   overflow: visible;
 }
 
 .shell[data-workspace-animating] .app-header {
   justify-self: start;
+}
+
+.shell[data-workspace-animating] .ready-card {
+  width: 100%;
 }
 
 .shell:has(.ready-card.imposing) .app-brand strong {
@@ -4038,6 +4047,14 @@ input[aria-invalid="true"] {
 .elm-shell .operation-chooser button { min-height:44px; border:0; padding:8px 16px; background:transparent; color:var(--text-muted); }
 .elm-shell .operation-chooser button[aria-pressed=true] { color:var(--text-strong); box-shadow:inset 0 -3px var(--accent); }
 .elm-shell .elm-impose-grid { flex:1; min-height:0; height:100%; }
+.elm-shell .elm-impose-grid { animation: workspace-content-enter 160ms ease-out; }
+@keyframes workspace-content-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .elm-shell .elm-impose-grid { animation: none; }
+}
 .elm-shell .elm-setup { grid-template-rows:auto minmax(0,1fr) auto; padding-top:0 !important; }
 .elm-shell .elm-setup .gang-setup-fields { overflow:auto; min-height:0; padding:16px; display:block; }
 .elm-shell .elm-setup .setup-step-panel { display:grid; gap:16px; }
@@ -4443,8 +4460,18 @@ small { color: var(--text-muted); }
 }
 
 #pdf-ui { min-height: 100dvh; }
+/* One scrolling owner keeps viewport width stable during tool changes. */
+html:has(.elm-shell), body:has(.elm-shell), #app:has(.elm-shell) {
+  height: 100%;
+  overflow: hidden;
+}
+#pdf-ui .elm-shell { height: 100dvh; min-height: 0; }
+#pdf-ui .elm-shell.generic-shell:not(.empty-shell):not([data-workspace-animating]) {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
 #pdf-ui #upload-card { width: 100%; min-height: 260px; display: grid; place-items: center; }
-#pdf-ui .da-theme-toggle { flex: none; width: 44px; height: 44px; min-height: 44px; }
+#pdf-ui .da-theme-toggle { flex: none; width: 44px; min-width: 44px; height: 44px; min-height: 44px; }
 #pdf-ui .sheet-item:focus { outline: none; }
 #pdf-ui .da-field { min-width: 0; }
 #pdf-ui .artwork-fitting .da-field-presentation { margin: 0; }
@@ -4485,43 +4512,64 @@ small { color: var(--text-muted); }
 #pdf-ui .impose-artwork-files .queue-heading { display: none; }
 #pdf-ui .impose-artwork-files .file-queue-head { display: none; }
 #pdf-ui .file-queue .da-file-list { min-width: 0; }
-/* Keep the queue and export panel on the same baseline. Short queues use the
-   available space, with a cap so a single file never becomes a giant tile. */
-#pdf-ui .ready-card:not(.imposing) .workspace-grid { align-items: stretch; }
+/* Conversion workspaces follow their content: files, settings, then export. */
+#pdf-ui .shell.generic-shell:not(.empty-shell) {
+  width: min(640px, calc(100vw - 24px));
+}
+#pdf-ui .ready-card:not(.imposing) .workspace-grid.ordered-files {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+  padding: 24px;
+}
+#pdf-ui .ready-card:not(.imposing) .file-queue {
+  grid-template-rows: auto auto;
+  gap: 12px;
+}
+#pdf-ui .ready-card:not(.imposing) .file-queue-head h2 { font-size: 18px; }
 #pdf-ui .ready-card:not(.imposing) .tool-form {
+  display: grid;
   height: auto;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  gap: 20px;
+  padding: 24px 0 0;
+  border: 0;
+  border-top: 1px solid var(--da-divider);
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
 }
 #pdf-ui .ready-card:not(.imposing) .file-queue .da-file-list {
-  display: flex;
-  flex-direction: column;
   min-height: 0;
 }
 #pdf-ui .ready-card:not(.imposing) .da-file-list .da-reorderable {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
   min-height: 0;
 }
 #pdf-ui .ready-card:not(.imposing) .da-file-list .da-reorderable__list {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  max-height: calc(var(--file-count) * 144px);
+  display: grid;
+  max-height: min(36dvh, 280px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 #pdf-ui .ready-card:not(.imposing) .da-file-list .da-reorderable__item {
-  flex: 1 0 76px;
-  min-height: 76px;
-  max-height: 144px;
+  min-height: 68px;
+  padding: 12px;
   align-items: center;
 }
+#pdf-ui .ready-card:not(.imposing) .single-file .da-field__help,
+#pdf-ui .ready-card:not(.imposing) .single-file .da-reorderable__position,
+#pdf-ui .ready-card:not(.imposing) .single-file .da-reorderable__actions > :nth-child(-n + 2) {
+  display: none;
+}
+#pdf-ui .ready-card:not(.imposing) .single-file .da-reorderable__list { margin-top: 0; }
+#pdf-ui .ready-card:not(.imposing) .single-file .da-reorderable__item { grid-template-columns: minmax(0, 1fr) auto; }
 #pdf-ui .page-selection-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
 #pdf-ui .app-header-actions { justify-content: flex-end; }
-#pdf-ui #workspace-actions-trigger { min-height: 44px; }
-#pdf-ui #workspace-actions-trigger::after {
-  content: ""; width: 7px; height: 7px; margin-left: 4px;
-  border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: translateY(-2px) rotate(45deg);
-}
+#pdf-ui .app-workspace-selector .da-field--surface { padding: 0; border: 0; }
+#pdf-ui #workspace-actions-trigger { min-height: 44px; padding: 4px 16px; border-radius: var(--da-radius); font-size: 16px; font-weight: 550; }
+#pdf-ui #workspace-actions-trigger:hover,
+#pdf-ui #workspace-actions-trigger[aria-expanded="true"] { background: var(--da-accent-soft); }
+#pdf-ui #workspace-actions { width: max-content; font-size: 15px; font-weight: 400; }
 #pdf-ui .setup-stepper ol { grid-template-columns: repeat(3, minmax(0, 1fr)); container-type: inline-size; }
 #pdf-ui .setup-step-label { max-width: 100%; font-size: clamp(12px, 3.8cqi, 14px); overflow-wrap: anywhere; }
 #pdf-ui .setup-stepper li { display: flex; }
@@ -4549,26 +4597,7 @@ small { color: var(--text-muted); }
   #pdf-ui .app-tool-selector .da-dropdown__trigger { font-size: 18px; }
 }
 
-/* File-only workflows keep the ordered queue wide and the export close by. */
-#pdf-ui .ready-card:not(.imposing) .workspace-grid.file-action-workspace {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 20px;
-}
-#pdf-ui .ready-card:not(.imposing) .file-action-workspace .tool-form {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 16px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  overflow: visible;
-}
-#pdf-ui .file-action-workspace .tool-form-fields { flex: 1 1 240px; }
 #pdf-ui .file-action-workspace .field-help { margin: 0; }
-#pdf-ui .file-action-workspace .submit-row { flex: 0 0 auto; margin-left: auto; }
-#pdf-ui .file-action-workspace .submit-row button { min-width: 180px; }
 #pdf-ui .repeat-quantity-section {
   position: relative;
   gap: 8px;
@@ -4582,9 +4611,8 @@ small { color: var(--text-muted); }
 #pdf-ui .quantity-summary-detail { margin: 0; color: var(--da-muted); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 #pdf-ui .quantity-summary-edit { position: absolute; top: 4px; right: 4px; }
 @media (max-width: 540px) {
-  #pdf-ui .file-action-workspace .tool-form-fields,
-  #pdf-ui .file-action-workspace .submit-row { flex-basis: 100%; }
-  #pdf-ui .file-action-workspace .submit-row button { width: 100%; }
+  #pdf-ui .ready-card:not(.imposing) .workspace-grid.ordered-files { padding: 16px; gap: 20px; }
+  #pdf-ui .ready-card:not(.imposing) .tool-form { padding-top: 20px; }
   #pdf-ui .app-header { gap: 8px; padding: 12px; }
   #pdf-ui .app-header-actions { gap: 8px; }
   #pdf-ui #workspace-actions-trigger { padding-inline: 12px; font-size: 14px; }

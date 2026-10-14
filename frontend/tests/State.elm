@@ -162,7 +162,7 @@ tests =
                     ]
                     ()
             )
-        , test "Theme storage failure keeps the chosen theme and reports that it was not saved"
+        , test "Storage failure keeps the chosen theme and reports that it was not saved"
             (\_ ->
                 let
                     changed =
@@ -170,37 +170,18 @@ tests =
 
                     failed =
                         step
-                            (SharedBrowserResponse
+                            (BrowserEvent
                                 (E.object
-                                    [ ( "version", E.int 1 )
-                                    , ( "id", E.string "theme" )
-                                    , ( "kind", E.string "error" )
-                                    , ( "message", E.string "Storage unavailable" )
-                                    ]
+                                    [ ( "action", E.string "themeStorageError" ) ]
                                 )
                             )
                             changed
                 in
                 Expect.equal ( "dark", False, "" ) ( failed.theme, String.isEmpty failed.notice, failed.error )
             )
-        , test "Malformed shared browser responses preserve application state"
+        , test "Malformed browser events preserve application state"
             (\_ ->
-                Expect.equal initial (step (SharedBrowserResponse E.null) initial)
-            )
-        , test "Unsupported theme response versions and unrelated errors preserve application state"
-            (\_ ->
-                let
-                    response version id kind =
-                        E.object
-                            [ ( "version", E.int version )
-                            , ( "id", E.string id )
-                            , ( "kind", E.string kind )
-                            , ( "message", E.string "Storage unavailable" )
-                            ]
-                in
-                [ response 2 "theme" "error", response 1 "other" "error", response 1 "theme" "ok" ]
-                    |> List.map (\value -> step (SharedBrowserResponse value) initial)
-                    |> Expect.equal [ initial, initial, initial ]
+                Expect.equal initial (step (BrowserEvent E.null) initial)
             )
         , test "Dismissing an error toast retains the failed request and retry state"
             (\_ ->

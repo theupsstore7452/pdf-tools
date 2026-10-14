@@ -52,14 +52,18 @@ export function connect(app) {
   }, true);
   document.addEventListener('scroll', () => closeArtworkMenu(), true);
   window.addEventListener('resize', () => closeArtworkMenu());
-  let workspaceFrame, workspaceAnimations = [];
+  let workspaceFrame, workspaceAnimations = [], workspaceContent;
   const stopWorkspaceTransition = () => {
     cancelAnimationFrame(workspaceFrame);
     workspaceAnimations.forEach(animation => animation.cancel());
     workspaceAnimations = [];
+    workspaceContent?.style.removeProperty('width');
+    workspaceContent?.style.removeProperty('height');
+    workspaceContent = undefined;
     const shell = document.querySelector('.elm-shell');
     shell?.removeAttribute('data-workspace-animating');
     shell?.style.removeProperty('--workspace-rows');
+    shell?.style.removeProperty('--workspace-columns');
   };
   const animateWorkspace = () => {
     const shell = document.querySelector('.elm-shell');
@@ -70,6 +74,10 @@ export function connect(app) {
     const frames = ['.app-header', '.ready-shell', '.ready-card'].map(selector => {
       const element = shell.querySelector(selector);
       return element && {element, bounds:element.getBoundingClientRect(), radius:getComputedStyle(element).borderRadius};
+    }).filter(Boolean);
+    const contents = ['.workspace-grid > .file-queue', '.tool-form-fields'].map(selector => {
+      const element = shell.querySelector(selector);
+      return element && {selector, height:element.getBoundingClientRect().height};
     }).filter(Boolean);
     stopWorkspaceTransition();
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -82,9 +90,19 @@ export function connect(app) {
       // the header's intrinsic width. Otherwise it shrinks too far, then jumps
       // back to its stretched width when the animation is removed.
       const targets = frames.filter(frame => frame.element.isConnected).map(frame => ({...frame, next:frame.element.getBoundingClientRect(), nextRadius:getComputedStyle(frame.element).borderRadius}));
+      const card = targets.find(({element}) => element.matches('.ready-card'));
+      // Keep incoming content at its settled width. Resizing its parent must
+      // not wrap labels or squeeze the preview through intermediate layouts.
+      workspaceContent = shell.querySelector('.ready-card > .workspace-grid, .ready-card > .gang-workspace');
+      if (workspaceContent) {
+        const bounds = workspaceContent.getBoundingClientRect();
+        workspaceContent.style.width = `${bounds.width}px`;
+        if (!genericSwitch) workspaceContent.style.height = `${bounds.height}px`;
+      }
       // Keep the grid's final positions fixed while the child frames resize;
       // centering must not shift a second time during the return animation.
       shell.style.setProperty('--workspace-rows', style.gridTemplateRows);
+      shell.style.setProperty('--workspace-columns', style.gridTemplateColumns);
       shell.setAttribute('data-workspace-animating', '');
       workspaceAnimations = targets.map(({element, bounds, radius, next, nextRadius}) => {
         const shape = {borderRadius:radius, height:`${bounds.height}px`};
@@ -95,6 +113,27 @@ export function connect(app) {
         }
         return element.animate([shape, settled], options);
       });
+      if (genericSwitch) {
+        // In the vertical stack, animate the rows themselves so the divider
+        // and download action travel with the changing card height.
+        for (const {selector, height} of contents) {
+          const element = shell.querySelector(selector);
+          if (element) workspaceAnimations.push(element.animate([
+            {height:`${height}px`},
+            {height:`${element.getBoundingClientRect().height}px`}
+          ], options));
+        }
+        const fields = shell.querySelector('.tool-form-fields');
+        if (fields) workspaceAnimations.push(fields.animate([{opacity:0}, {opacity:1}], {duration:160, easing:'ease-out'}));
+      } else if (workspaceContent && card) {
+        // Returning to the compact stack keeps its action aligned with the
+        // moving bottom edge. Impose reveals its setup and canvas together.
+        const offset = shell.classList.contains('generic-shell') ? card.bounds.height - card.next.height : 12;
+        workspaceAnimations.push(workspaceContent.animate([
+          {transform:`translateY(${offset}px)`, opacity:0},
+          {transform:'translateY(0)', opacity:1}
+        ], options));
+      }
       const current = workspaceAnimations;
       Promise.allSettled(current.map(animation => animation.finished)).then(() => {
         if (workspaceAnimations === current) stopWorkspaceTransition();
@@ -237,6 +276,9 @@ export function connect(app) {
       case 'download': void download(command); break;
       case 'theme':
         document.documentElement.dataset.theme = command.value;
+        // Keep the raw preference readable by the startup loader and older builds.
+        try { localStorage.setItem('pdf-tools-theme', command.value); }
+        catch (_) { send({action:'themeStorageError'}); }
         break;
       case 'focus': requestAnimationFrame(() => document.getElementById(command.id)?.focus()); break;
       case 'dialog':

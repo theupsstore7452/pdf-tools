@@ -323,7 +323,8 @@ workspaceActions m =
                 "files"
     in
     div [ class "app-header-actions" ]
-        [ Menu.trigger [] config "Workspace" (SetWorkspaceMenu (not m.workspaceMenu))
+        [ div [ class "app-workspace-selector" ]
+            [ Menu.dropdownTrigger [] config "Workspace" (SetWorkspaceMenu (not m.workspaceMenu)) ]
         , themeToggle m
         , Menu.view []
             config
@@ -449,11 +450,11 @@ emptyView m =
 
 queueView : Model -> Html Msg
 queueView m =
-    section [ class "file-queue", attribute "aria-label" "Selected files" ]
+    section [ classList [ ( "file-queue", True ), ( "single-file", List.length m.files == 1 ) ], attribute "aria-label" "Selected files" ]
         [ div [ class "file-queue-head" ]
             [ div [ class "queue-heading" ] [ h2 [] [ text "Files" ], span [ class "count-badge" ] [ text (String.fromInt (List.length m.files)) ] ]
             ]
-        , FileList.view [ style "--file-count" (String.fromInt (List.length m.files)) ]
+        , FileList.view []
             { id = "file-queue", label = "Selected files", moveUp = "Move up", moveDown = "Move down", remove = "Remove" }
             { items =
                 List.map

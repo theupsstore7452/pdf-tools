@@ -23,13 +23,13 @@ const reveal=setTimeout(()=>{startup.hidden=false},Math.max(0,700-performance.no
 const slow=setTimeout(()=>{status.textContent='Loading is taking longer than expected. You can keep waiting or retry.';retry.hidden=false},15000);
 const loadScript=src=>new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.onload=resolve;script.onerror=()=>reject(new Error('Application failed'));document.head.append(script)});
 try{
- await Promise.all([
+ const [,,{start}]=await Promise.all([
   new Promise((resolve,reject)=>{const css=document.getElementById('app-styles');css.onload=resolve;css.onerror=()=>reject(new Error('Stylesheet failed'));css.rel='stylesheet'}),
   loadScript('__ASSETS__/elm.js'),
-  loadScript('__ASSETS__/bootstrap.js')
+  import('./__ASSETS__/bootstrap.js')
  ]);
  const {connect}=await import('./__ASSETS__/bridge.js');
- await new Promise((resolve,reject)=>PdfToolsBrowser.start(connect,resolve,message=>reject(new Error(message))));
+ start(connect);
  startup.remove();
 }catch(error){console.error(error);startup.hidden=false;status.textContent='PDF Tools couldn’t start. Check your connection and try again.';status.setAttribute('role','alert');retry.hidden=false}
 finally{clearTimeout(reveal);clearTimeout(slow)}

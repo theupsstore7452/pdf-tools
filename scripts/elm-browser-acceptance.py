@@ -186,7 +186,7 @@ class Suite:
         self.select(three)
         self.idle()
         expect(self.page.locator('.app-file-context')).to_have_count(0)
-        expect(self.page.locator('.app-header-actions > button')).to_have_count(2)
+        expect(self.page.locator('.app-header-actions #workspace-actions-trigger, .app-header-actions .da-theme-toggle')).to_have_count(2)
         trigger = self.button('Workspace')
         toggle = self.page.get_by_role('switch', name='Dark mode')
         expect(toggle).to_be_visible()
@@ -331,6 +331,9 @@ class Suite:
         expect(control.locator('input:checked')).to_have_count(1)
 
     def presets(self):
+        # Let pending Elm updates and native popover toggles settle before
+        # deciding whether to open; otherwise a second click can close it.
+        self.page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
         trigger = self.page.get_by_role('button', name='Presets', exact=True)
         if trigger.get_attribute('aria-expanded') != 'true':
             trigger.click()
@@ -340,10 +343,13 @@ class Suite:
         return menu
 
     def close_presets(self):
+        self.page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
         trigger = self.page.get_by_role('button', name='Presets', exact=True)
         if trigger.get_attribute('aria-expanded') == 'true':
             trigger.click()
         expect(self.page.locator('.elm-presets-menu .da-popover')).to_be_hidden()
+        expect(trigger).to_have_attribute('aria-expanded', 'false')
+        self.page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
 
     def assert_pdf(self, path, labels, sizes=None):
         with fitz.open(path) as document:

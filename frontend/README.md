@@ -1,10 +1,10 @@
 # Elm frontend
 
 Enter `nix develop .#pdf-app` from the repository root. In this directory,
-`npm ci && npm run build` compiles Elm with optimization, checks the JavaScript
-bootstrap, hashes the complete Elm/bootstrap/bridge/DA-adapter/CSS bundle,
-writes `dist/app.html`, and generates gzip sidecars. Node and the pinned npm
-dependencies supply the frontend build tools.
+`npm ci && npm run build` compiles Elm with optimization,
+hashes the complete Elm/bootstrap/bridge/DA-adapter/CSS bundle, writes `dist/app.html`, and
+generates gzip sidecars. The bootstrap is plain JavaScript; frontend builds need
+only Node/npm and the pinned Elm compiler.
 Axum serves everything from that distribution; API URLs are relative. Elm's file
 picker, multipart uploads, JSON HTTP calls and polling are native Elm packages.
 The interface works on insecure HTTP origins. JavaScript uses no secure-context
@@ -48,16 +48,16 @@ preview-box geometry. Elm renders those plans in SVG. The old preview snapshot
 stays displayed until its replacement completes. Invalid inputs retain their
 exact drafts and block export; they never overwrite valid numeric values.
 
-`browser/bootstrap.js` mounts Elm and validates its required ports. The HTML
-loader waits for styles, Elm, and this JavaScript bootstrap, then attaches the
-PDF resource adapter before reporting that startup is ready. Startup errors
-show Retry, including a missing Elm module or missing bridge ports.
+`browser/bootstrap.js` mounts Elm with the startup theme and checks the
+`resources` and `browserEvents` ports before connecting the resource adapter.
+The HTML loader waits for styles, Elm, and the JavaScript bootstrap, then loads
+the adapter. Startup errors show Retry, including a missing Elm module or missing
+resource ports. Rust/Axum remains the HTTP server.
 
-`browserRequest` and `browserResponse` carry versioned theme-storage commands
-and responses. Theme writes retain the existing raw `pdf-tools-theme` value.
-Storage failures are reported to Elm and leave the selected theme active for
-the current tab. The app decodes its own responses and requires no external
-bootstrap library or Git submodule.
+`bridge.js` stores theme changes as the existing raw `pdf-tools-theme` value.
+Storage failures leave the selected theme active for the current tab and send
+`themeStorageError` through `browserEvents` so Elm can show feedback. There is no
+shared browser-library submodule or OCaml toolchain dependency.
 
 `bridge.js` owns PDF-specific browser resources through two documented ports:
 
@@ -88,6 +88,13 @@ controlled failure recovery, insecure HTTP, preview batches, keyboard focus and
 representative responsive breakpoints. `scripts/check.sh` runs the complete
 release acceptance with disposable persistent data.
 
+With the development server on port 3200, run
+`nix develop .#pdf-app --command node scripts/workspace-motion.mjs` from the
+repository root to check tool transitions using Agent Browser. It samples card,
+header, settings, and action bounds across desktop and mobile sizes, rapid
+switching, and reduced motion, and saves traces and screenshots under
+`/tmp/pdf-tools-workspace-motion`.
+
 The npm lockfile overrides elm-test's transitive Chokidar with 4.0.3 to remove
 the vulnerable legacy watcher dependency. elm-test watches explicit directories
 with globbing disabled; both an initial run and a file-change rerun were verified.
@@ -95,11 +102,11 @@ with globbing disabled; both an initial run and a file-change rerun were verifie
 ## Shared DA components
 
 Common buttons, fields, theme controls, and dialogs come from the pinned
-`da-components` 0.2.3 source archive. Both apps consume the same bundle. Domain
+`da-components` 0.2.5 source archive. Both apps consume the same bundle. Domain
 state and workflow layout stay in Elm; shared styles own the controls' appearance.
 Legacy layout CSS lives in the lower `app` cascade layer. The DA browser adapter
 owns dialog focus and dismissal, alongside the app's JavaScript bootstrap.
 
-`npm ci` installs `vendor/da-components-0.2.3.tgz`. The build includes its Elm
+`npm ci` installs `vendor/da-components-0.2.5.tgz`. The build includes its Elm
 sources, combines its stylesheet with app layout CSS, and versions/gzips its
 browser adapter with the other assets. No sibling checkout is needed.
