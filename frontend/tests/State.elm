@@ -96,8 +96,33 @@ tests =
                     after =
                         step (DropdownChanged "finished-orientation" "landscape" { state = Dropdown.initial, value = "portrait" }) before
                 in
-                Expect.equal ( { width = 2, height = 3.5 }, True, True )
-                    ( after.request.finishedCutSize, after.chosenWidth, after.chosenHeight )
+                Expect.equal ( { width = 2, height = 3.5 }, A.OrientationPreferenceUpright, ( True, True ) )
+                    ( after.request.finishedCutSize, after.request.orientationPreference, ( after.chosenWidth, after.chosenHeight ) )
+            )
+        , test "Finished orientation overrides a saved quarter-turn in a custom grid"
+            (\_ ->
+                let
+                    r =
+                        initial.request
+
+                    before =
+                        { initial
+                            | chosenWidth = True
+                            , chosenHeight = True
+                            , request =
+                                { r
+                                    | finishedCutSize = { width = 2, height = 3.5 }
+                                    , orientationPreference = A.OrientationPreferenceQuarterTurn
+                                    , layoutMode = A.LayoutModeManual
+                                    , manual = Just { rows = 1, columns = 2, rotationDegrees = 90, margins = Nothing }
+                                }
+                        }
+
+                    after =
+                        step (Field "finished-orientation" "landscape") before
+                in
+                Expect.equal ( { width = 3.5, height = 2 }, A.OrientationPreferenceUpright, Just { rows = 1, columns = 2, rotationDegrees = 0, margins = Nothing } )
+                    ( after.request.finishedCutSize, after.request.orientationPreference, after.request.manual )
             )
         , test "Changing sheet size through the dropdown retains finished sizing and fitting"
             (\_ ->

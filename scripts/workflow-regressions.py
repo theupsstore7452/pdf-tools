@@ -258,6 +258,41 @@ class Workflow:
         expect(self.page.locator('#finished-width')).to_have_value('2')
         expect(self.page.locator('#finished-height')).to_have_value('3')
 
+    def finished_orientation(self, fixture, custom):
+        self.impose(fixture)
+        self.page.locator('#finished-width').fill('3.5')
+        self.page.locator('#finished-height').fill('2')
+        self.button('Stretch').click()
+        if custom:
+            self.button('Custom grid').click()
+            self.page.get_by_label('Rows', exact=True).fill('1')
+            self.page.get_by_label('Columns', exact=True).fill('2')
+        self.idle()
+        orientation = self.page.get_by_role('combobox', name='Finished orientation', exact=True)
+        slot = self.layouts[-1]['placements'][0]
+        current = 'Landscape' if slot['finishedWidth'] > slot['finishedHeight'] else 'Portrait'
+        expect(orientation).to_have_text(current)
+        labels = ['Portrait', 'Landscape', 'Portrait'] if current == 'Landscape' else ['Landscape', 'Portrait', 'Landscape']
+        for label in labels:
+            size = (2, 3.5) if label == 'Portrait' else (3.5, 2)
+            self.dropdown('Finished orientation', label)
+            self.idle()
+            layout = self.layouts[-1]
+            assert layout['rotationDegrees'] == 0, layout
+            assert layout['orientationPreference'] == 'upright', layout
+            assert layout['finishedCutSize'] == dict(zip(('width', 'height'), size))
+            expect(self.page.get_by_role('combobox', name='Finished orientation', exact=True)).to_have_text(label)
+            cut = self.page.locator('.sheet-svg .piece-hit-area').first
+            assert abs(float(cut.get_attribute('width')) - size[0]) < .001
+            assert abs(float(cut.get_attribute('height')) - size[1]) < .001
+            self.step('Bleed')
+            output = self.download('Download imposed PDF', label.lower() + '.pdf')
+            with fitz.open(output) as doc:
+                artwork = next(d for d in doc[0].get_drawings() if d['fill'] == (1, 0, 0))
+                assert abs(artwork['rect'].width - size[0] * 72) < .1, artwork
+                assert abs(artwork['rect'].height - size[1] * 72) < .1, artwork
+            self.step('Size')
+
     def image_conversion(self, fixture):
         path, pixels, color = fixture
         self.select(path)
@@ -547,7 +582,7 @@ def main():
     parser.add_argument('--url', default='http://127.0.0.1:3001')
     parser.add_argument('--browsers', default='chromium,firefox')
     parser.add_argument('--output', default='/tmp/pdf-elm-acceptance/workflows')
-    parser.add_argument('--checks', default='cuts,images,merge,convert,order,grid,duplex,recovery,references')
+    parser.add_argument('--checks', default='cuts,orientation,images,merge,convert,order,grid,duplex,recovery,references')
     args = parser.parse_args()
     root = pathlib.Path(args.output)
     cuts, pdfs, images = make_fixtures(root / 'fixtures')
@@ -556,6 +591,9 @@ def main():
         cases.append(('cuts', name, lambda w, p=path, s=size, b=bleed, r=rotation: w.cut(p, s, b, r)))
     for image in images:
         cases.append(('images', image[0].name, lambda w, f=image: w.image_conversion(f)))
+    for custom in (False, True):
+        cases.append(('orientation', 'custom-grid' if custom else 'max-per-sheet',
+                      lambda w, c=custom: w.finished_orientation(cuts[-1][1], c)))
     cases += [('merge', 'reorder-remove-rotations', lambda w: w.merge(pdfs)),
               ('convert', 'raster-extraction-matrix', lambda w: w.raster_and_extract(pdfs[0])),
               ('order', 'image-reorder-remove', lambda w: w.image_order(images)),

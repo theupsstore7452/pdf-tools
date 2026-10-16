@@ -101,15 +101,40 @@ orientationDropdown m =
     let
         config =
             DaField.config "finished-orientation" "Finished orientation"
+
+        r =
+            m.request
+
+        rotation =
+            case r.orientationPreference of
+                A.OrientationPreferenceUpright ->
+                    0
+
+                A.OrientationPreferenceQuarterTurn ->
+                    90
+
+                _ ->
+                    Maybe.map .rotationDegrees m.layout
+                        |> Maybe.withDefault (Maybe.map .rotationDegrees r.manual |> Maybe.withDefault 0)
+
+        selected =
+            case r.orientationPreference of
+                A.OrientationPreferencePortrait ->
+                    "portrait"
+
+                A.OrientationPreferenceLandscape ->
+                    "landscape"
+
+                _ ->
+                    if (r.finishedCutSize.width > r.finishedCutSize.height) /= (rotation == 90) then
+                        "landscape"
+
+                    else
+                        "portrait"
     in
     dropdownControl m
         { config | disabled = m.busy || not (m.chosenWidth && m.chosenHeight) || Dict.member "invalid:finished-width" m.drafts || Dict.member "invalid:finished-height" m.drafts }
-        (if m.request.finishedCutSize.width > m.request.finishedCutSize.height then
-            "landscape"
-
-         else
-            "portrait"
-        )
+        selected
         [ ( "portrait", "Portrait" ), ( "landscape", "Landscape" ) ]
 
 
