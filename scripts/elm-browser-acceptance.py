@@ -609,6 +609,11 @@ class Suite:
         expect(self.page.get_by_role('combobox', name='Finished orientation', exact=True)).to_be_enabled()
         self.page.locator('#finished-width').fill('3')
         self.page.locator('#finished-height').fill('2')
+        self.idle()
+        # Automatic fitting may place these pieces portrait. Start explicitly
+        # landscape so Home commits a different orientation in the keyboard test.
+        self.dropdown('Finished orientation', 'Landscape')
+        self.idle()
         orientation = self.page.get_by_role('combobox', name='Finished orientation', exact=True)
         orientation.focus()
         orientation.press('Home')
