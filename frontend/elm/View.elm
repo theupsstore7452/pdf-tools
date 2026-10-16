@@ -289,7 +289,7 @@ view m =
          else
             Theme.Light
         )
-        (id "pdf-ui" :: Theme.accent "#2563eb")
+        [ id "pdf-ui" ]
         [ appView m ]
 
 
