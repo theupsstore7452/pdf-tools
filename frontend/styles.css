@@ -3,33 +3,33 @@
   --workspace-duration: 320ms;
   --workspace-easing: cubic-bezier(0.22, 1, 0.36, 1);
   color-scheme: light;
-  --bg: #f7f7f7;
+  --bg: #f5f8f8;
   --surface: #ffffff;
-  --surface-muted: #f0f0f0;
+  --surface-muted: #edf4f5;
   --text: #202020;
   --text-strong: #171717;
   --text-ui: #262626;
   --text-label: #3a3a3a;
   --text-muted: #626262;
   --text-subtle: #686868;
-  --border: #e4e4e4;
-  --border-muted: #ededed;
-  --border-strong: #858585;
-  --border-hover: #777777;
-  --divider: #e9e9e9;
-  --accent: #202020;
-  --accent-strong: #171717;
-  --accent-hover: #3a3a3a;
-  --accent-soft: #ededed;
+  --border: #d6e3e5;
+  --border-muted: #e2ecee;
+  --border-strong: #71878b;
+  --border-hover: #007f94;
+  --divider: #dce7e9;
+  --accent: #007f94;
+  --accent-strong: #006779;
+  --accent-hover: #006779;
+  --accent-soft: #e0f2f5;
   --on-accent: #ffffff;
   --document-line: #dadada;
   --progress-track: #dedede;
   --error: #b8473d;
   --danger: #b42318;
-  --focus: #171717;
+  --focus: #006779;
   --shadow: rgba(0, 0, 0, 0.04);
-  --accent-shadow: rgba(0, 0, 0, 0.04);
-  --canvas: #ededed;
+  --accent-shadow: rgba(0, 127, 148, 0.1);
+  --canvas: #e9f0f1;
   --canvas-grid: rgba(0, 0, 0, 0.1);
   --paper: #ffffff;
   --editor-rail: #ffffff;
@@ -4425,34 +4425,20 @@ small { color: var(--text-muted); }
 
 }
 
-/* App layout uses the shared theme; common control appearance belongs to DA. */
-.da-ui {
-  --bg: var(--da-background);
-  --surface: var(--da-surface);
-  --surface-raised: var(--da-surface-muted);
-  --surface-muted: var(--da-surface-muted);
-  --surface-hover: var(--da-surface-muted);
-  --editor-rail: var(--da-surface);
-  --text: var(--da-text);
-  --text-strong: var(--da-text);
-  --text-ui: var(--da-text);
-  --text-label: var(--da-muted);
-  --text-muted: var(--da-muted);
-  --text-subtle: var(--da-muted);
-  --muted: var(--da-muted);
-  --border: var(--da-divider);
-  --border-strong: var(--da-border);
-  --control-border: var(--da-border);
-  --divider: var(--da-divider);
-  --accent: var(--da-accent);
-  --accent-ink: var(--da-accent);
-  --accent-strong: var(--da-focus);
-  --accent-hover: color-mix(in srgb, var(--da-accent) 90%, var(--da-text));
-  --on-accent: var(--da-on-accent);
-  --accent-soft: var(--da-accent-soft);
-  --focus: var(--da-focus);
-  --error: var(--da-danger);
-  --danger: var(--da-danger);
+/* Keep app surfaces and shared controls on the same theme palette. */
+#pdf-ui {
+  --da-background: var(--bg);
+  --da-surface: var(--surface);
+  --da-surface-muted: var(--surface-muted);
+  --da-text: var(--text);
+  --da-muted: var(--text-muted);
+  --da-border: var(--border-strong);
+  --da-divider: var(--border);
+  --da-accent: var(--accent);
+  --da-on-accent: var(--on-accent);
+  --da-accent-soft: var(--accent-soft);
+  --da-focus: var(--focus);
+  --da-danger: var(--danger);
 }
 .da-ui .da-button:is([aria-pressed="true"], [aria-selected="true"], .selected, .active) {
   background: var(--da-accent-soft);
@@ -4460,6 +4446,11 @@ small { color: var(--text-muted); }
 }
 
 #pdf-ui { min-height: 100dvh; }
+#pdf-ui[data-da-theme="light"] .da-button--primary {
+  --da-accent: #ffcc00;
+  --da-on-accent: #202020;
+}
+#pdf-ui[data-da-theme="light"] .home-header h1 { color: var(--accent); }
 /* One scrolling owner keeps viewport width stable during tool changes. */
 html:has(.elm-shell), body:has(.elm-shell), #app:has(.elm-shell) {
   height: 100%;
