@@ -1401,20 +1401,26 @@ class Suite:
           for (const key of ['x','y','width','height']) if (hit.getAttribute(key) !== e.getAttribute(key)) throw new Error('Selection does not match selected cut');
           return {outline:getComputedStyle(item).outlineStyle, stroke:style.strokeWidth, effect:style.vectorEffect, color:style.stroke, dash:style.strokeDasharray};
         }''')
-        assert style == {'outline':'none','stroke':'2.5px','effect':'non-scaling-stroke','color':'rgb(37, 99, 235)','dash':'none'}, style
+        selection_colors = {
+            'dark': ('rgb(237, 237, 237)', 'rgb(23, 23, 23)'),
+            'light': ('rgb(0, 127, 148)', 'rgb(255, 255, 255)'),
+        }
+        selection_color, halo_color = selection_colors[self.page.locator('html').get_attribute('data-theme')]
+        assert style == {'outline':'none','stroke':'2.5px','effect':'non-scaling-stroke','color':selection_color,'dash':'none'}, style
         halo = self.page.locator('.piece-selection-halo')
-        assert halo.evaluate('e => getComputedStyle(e).stroke') == 'rgb(255, 255, 255)'
+        assert halo.evaluate('e => getComputedStyle(e).stroke') == halo_color
         expect(selection).to_have_count(1)
         expect(self.page.locator('.piece-selection-halo')).to_have_count(1)
         assert self.page.locator('.sheet-item[data-selected=true]').count() == 1
         self.page.screenshot(path=str(self.out/'impression-selection.png'))
         self.toggle_theme()
         second.focus()
-        expect(selection).to_have_css('stroke', 'rgb(37, 99, 235)')
-        expect(halo).to_have_css('stroke', 'rgb(255, 255, 255)')
+        selection_color, halo_color = selection_colors[self.page.locator('html').get_attribute('data-theme')]
+        expect(selection).to_have_css('stroke', selection_color)
+        expect(halo).to_have_css('stroke', halo_color)
         self.page.screenshot(path=str(self.out/'impression-selection-light.png'))
         self.toggle_theme()
-        self.checks.append('impression selection: one selected repeated copy, pointer/keyboard/open context menu and focus return, blue 2.5px outline with contrasting border in both themes, exact cut geometry, no native SVG focus ring, light/dark screenshots')
+        self.checks.append('impression selection: one selected repeated copy, pointer/keyboard/open context menu and focus return, themed 2.5px outline with contrasting border in both themes, exact cut geometry, no native SVG focus ring, light/dark screenshots')
 
 
 
