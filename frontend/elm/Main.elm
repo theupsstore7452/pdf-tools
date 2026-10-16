@@ -1351,7 +1351,17 @@ field key value m =
                         else
                             { width = shorter, height = longer }
                 in
-                schedule { m | request = { r | finishedCutSize = next }, drafts = Dict.remove "finished-width" (Dict.remove "finished-height" m.drafts), autoFinishedSize = False }
+                schedule
+                    { m
+                        | request =
+                            { r
+                                | finishedCutSize = next
+                                , orientationPreference = A.OrientationPreferenceUpright
+                                , manual = Maybe.map (\grid -> { grid | rotationDegrees = 0 }) r.manual
+                            }
+                        , drafts = Dict.remove "finished-width" (Dict.remove "finished-height" m.drafts)
+                        , autoFinishedSize = False
+                    }
 
             else
                 ( m, Cmd.none )
