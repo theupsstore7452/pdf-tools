@@ -29,6 +29,8 @@ use zip::ZipArchive;
 
 #[path = "support/finished_size.rs"]
 mod finished_size;
+#[path = "support/page_organization.rs"]
+mod page_organization;
 
 struct MultipartPart {
     name: String,

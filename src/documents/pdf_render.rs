@@ -53,6 +53,23 @@ pub(crate) fn raster_preview_pages(
     path: &Path,
     page_numbers: Vec<usize>,
 ) -> AppResult<Vec<PreviewRaster>> {
+    raster_previews(pdfium, path, page_numbers, false)
+}
+
+pub(crate) fn raster_page_thumbnails(
+    pdfium: &Pdfium,
+    path: &Path,
+    page_numbers: Vec<usize>,
+) -> AppResult<Vec<PreviewRaster>> {
+    raster_previews(pdfium, path, page_numbers, true)
+}
+
+fn raster_previews(
+    pdfium: &Pdfium,
+    path: &Path,
+    page_numbers: Vec<usize>,
+    thumbnail: bool,
+) -> AppResult<Vec<PreviewRaster>> {
     let started = std::time::Instant::now();
     let deadline = started + PREVIEW_RENDER_DEADLINE;
     if page_numbers.is_empty() {
@@ -82,7 +99,12 @@ pub(crate) fn raster_preview_pages(
         // safely. The deadline is therefore cooperative: it prevents another
         // page from starting after the budget has elapsed.
         ensure_preview_deadline(deadline)?;
-        rasters.push(raster_preview_page(&document, page_count, page_number)?);
+        rasters.push(raster_preview_page(
+            &document,
+            page_count,
+            page_number,
+            thumbnail,
+        )?);
     }
     tracing::debug!(
         page_count = rasters.len(),
@@ -105,6 +127,7 @@ fn raster_preview_page(
     document: &PdfDocument<'_>,
     page_count: usize,
     page_number: usize,
+    thumbnail: bool,
 ) -> AppResult<PreviewRaster> {
     if page_number == 0 || page_number > page_count {
         return Err(AppError::bad_request(format!(
@@ -122,8 +145,8 @@ fn raster_preview_page(
     if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
         return Err(AppError::bad_request("PDF page has invalid dimensions"));
     }
-    let scale = (f64::from(PREVIEW_MAX_WIDTH) / width)
-        .min(f64::from(PREVIEW_MAX_HEIGHT) / height)
+    let scale = (f64::from(if thumbnail { 240 } else { PREVIEW_MAX_WIDTH }) / width)
+        .min(f64::from(if thumbnail { 320 } else { PREVIEW_MAX_HEIGHT }) / height)
         .min((PREVIEW_MAX_PIXELS as f64 / (width * height)).sqrt());
     let target_width = (width * scale).floor().max(1.0) as i32;
     let target_height = (height * scale).floor().max(1.0) as i32;

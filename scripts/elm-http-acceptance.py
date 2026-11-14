@@ -42,8 +42,8 @@ with sync_playwright() as pw:
         page.locator('#finished-width').fill('3')
         page.locator('#finished-height').fill('2')
         page.locator('.sheet-svg image').first.wait_for(timeout=60000)
-        for step in ['Sheet','Bleed']:
-            page.get_by_role('button',name='Continue',exact=True).click()
+        for action, step in [('Next: Sheet', 'Sheet'), ('Next: Review', 'Review')]:
+            page.get_by_role('button',name=action,exact=True).click()
             expect(page.locator('.setup-stepper button[aria-selected=true]')).to_have_text(step)
         with page.expect_download(timeout=60000) as download:
             page.get_by_role('button',name='Download imposed PDF',exact=True).click()

@@ -34,7 +34,20 @@ pub(crate) async fn convert_form(
     operation_permit: OperationPermit,
     progress: Option<ProgressCallback>,
 ) -> AppResult<FileDownload> {
-    match ConvertTarget::parse(form.required_field("target")?)? {
+    let target = ConvertTarget::parse(form.required_field("target")?)?;
+    if matches!(target, ConvertTarget::Pdf) {
+        require_images(&form.files, "target=pdf requires PNG or JPEG input")?;
+    } else {
+        require_pdfs(&form.files, "target=png/jpeg requires PDF input")?;
+    }
+    let form = super::pages::ordered_form(
+        state.clone(),
+        form,
+        operation_permit.clone(),
+        progress.clone(),
+    )
+    .await?;
+    match target {
         ConvertTarget::Pdf => images_to_pdf(state, form, operation_permit, progress).await,
         ConvertTarget::Png => {
             pdfs_to_images(state, form, operation_permit, RasterFormat::Png, progress).await

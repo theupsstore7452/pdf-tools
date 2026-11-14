@@ -8,7 +8,7 @@ const bridge = readFileSync(new URL('../bridge.js', import.meta.url), 'utf8')
   .replace("import { install } from './da-components.js';", '')
   .replace('export function connect', 'function connect');
 
-function browser(theme = 'dark') {
+function browser(theme) {
   const initialized = [], connected = [], responses = [], writes = [];
   const node = {};
   let receive;
@@ -32,7 +32,7 @@ function browser(theme = 'dark') {
 }
 
 test('mounts Elm with a valid theme before connecting its resource adapter', () => {
-  for (const [theme, expected] of [['light', 'light'], ['dark', 'dark'], ['invalid', 'dark'], [undefined, 'dark']]) {
+  for (const [theme, expected] of [['light', 'light'], ['dark', 'dark'], ['invalid', 'light'], [undefined, 'light']]) {
     const b = browser(theme);
     b.start(app => {
       assert.equal(app, b.app);

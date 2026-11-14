@@ -1,6 +1,52 @@
-module Imposition exposing (applyPreset, artworkRotation, bindSource, detectedFinishedSize, initial, pageNumber, pagesForSheet, quantities, setMode, setSides, summary)
+module Imposition exposing (applyPreset, artworkRotation, backMirrorsX, bindSource, detectedFinishedSize, fitToSheet, initial, pageNumber, pagesForSheet, printerFlip, quantities, setMode, setSides, sideRotation, summary)
 
 import Api.Generated as A
+
+
+backMirrorsX : A.LayoutResult -> Bool
+backMirrorsX l =
+    let
+        landscape =
+            l.parentSheetSize.width > l.parentSheetSize.height
+    in
+    Maybe.map
+        (\d ->
+            (if d.flipEdge == A.DuplexFlipEdgeLongEdge then
+                not landscape
+
+             else
+                landscape
+            )
+                /= d.rotateBack180
+        )
+        l.duplex
+        |> Maybe.withDefault False
+
+
+sideRotation : A.LayoutResult -> Bool -> Int
+sideRotation l back =
+    if back && l.duplex /= Nothing then
+        modBy 360
+            ((if backMirrorsX l then
+                360
+
+              else
+                540
+             )
+                - l.rotationDegrees
+            )
+
+    else
+        l.rotationDegrees
+
+
+printerFlip : A.DuplexSettings -> String
+printerFlip d =
+    if (d.flipEdge == A.DuplexFlipEdgeLongEdge) /= d.rotateBack180 then
+        "long edge"
+
+    else
+        "short edge"
 
 
 initial : A.LayoutRequest
@@ -211,3 +257,82 @@ pagesForSheet l sheet back =
                     xs ++ [ n ]
             )
             []
+
+
+fitToSheet : A.LayoutRequest -> A.LayoutRequest
+fitToSheet r =
+    let
+        cut =
+            r.finishedCutSize
+
+        bleed =
+            if r.bleedOption == A.BleedOptionScaleToBleed then
+                2 * r.createdBleedAmount
+
+            else
+                2 * Maybe.withDefault 0 r.sourceBleedOverride
+
+        margins =
+            if r.layoutMode == A.LayoutModeManual then
+                r.manual |> Maybe.andThen .margins
+
+            else
+                Nothing
+
+        w =
+            r.parentSheetSize.width - bleed - (margins |> Maybe.map (\m -> m.left + m.right) |> Maybe.withDefault 0)
+
+        h =
+            r.parentSheetSize.height - bleed - (margins |> Maybe.map (\m -> m.top + m.bottom) |> Maybe.withDefault 0)
+
+        scale rotated =
+            min
+                (w
+                    / (if rotated then
+                        cut.height
+
+                       else
+                        cut.width
+                      )
+                )
+                (h
+                    / (if rotated then
+                        cut.width
+
+                       else
+                        cut.height
+                      )
+                )
+
+        rotation =
+            case r.orientationPreference of
+                A.OrientationPreferenceQuarterTurn ->
+                    True
+
+                A.OrientationPreferenceLandscape ->
+                    cut.width < cut.height
+
+                A.OrientationPreferencePortrait ->
+                    cut.width > cut.height
+
+                A.OrientationPreferenceAuto ->
+                    if r.layoutMode == A.LayoutModeManual then
+                        r.manual |> Maybe.map (\m -> m.rotationDegrees == 90) |> Maybe.withDefault False
+
+                    else
+                        scale True > scale False
+
+                _ ->
+                    False
+
+        amount =
+            min 1 (scale rotation)
+
+        down value =
+            toFloat (floor (value * amount * 1000000)) / 1000000
+    in
+    if amount > 0 && amount < 0.999999 && down cut.width >= 0.01 && down cut.height >= 0.01 then
+        { r | finishedCutSize = { width = down cut.width, height = down cut.height } }
+
+    else
+        r

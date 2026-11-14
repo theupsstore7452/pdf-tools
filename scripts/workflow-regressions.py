@@ -131,12 +131,29 @@ class Workflow:
             if 'application/json' in response.headers.get('content-type', ''):
                 source = response.json()
                 self.sources.append(source['sourceId'])
-                self.analyses.append(source['analysis'])
+                if 'analysis' in source:
+                    self.analyses.append(source['analysis'])
+
+    def open_options(self, selector, label):
+        details = self.page.locator(selector)
+        summary = details.locator('summary').first
+        expect(summary).to_have_text(label)
+        if details.get_attribute('open') is None:
+            summary.click()
+        expect(details).to_have_attribute('open', '')
+        return details
 
     def button(self, name):
+        if name in ('Custom grid', 'Max per sheet'):
+            self.open_options('.size-layout-options', 'Orientation and layout')
+        if name == 'Organize pages' and self.page.locator('.toolbar-more').count():
+            self.open_options('.toolbar-more', 'Artwork tools')
+        name = {'Individual': 'One PDF per page', 'Combined': 'One PDF', 'Chunks': 'Page groups'}.get(name, name)
         return self.page.get_by_role('button', name=name, exact=True).or_(self.page.get_by_role('radio', name=name, exact=True))
 
     def dropdown(self, name, value):
+        if name == 'Finished orientation':
+            self.open_options('.size-layout-options', 'Orientation and layout')
         labels = {
             '12x18': '12 × 18 in', '8.5x11': '8.5 × 11 in',
             '11x17': '11 × 17 in', '13x19': '13 × 19 in', 'custom': 'Custom size',
@@ -182,8 +199,11 @@ class Workflow:
         expect(self.page.locator('.sheet-svg')).to_be_visible()
 
     def step(self, name):
-        self.page.get_by_role('tab', name=name, exact=True).click()
+        name = 'Review' if name == 'Bleed' else name
+        tab = self.page.locator('.setup-stepper').get_by_role('tab', name=name, exact=True)
+        tab.click()
         self.idle()
+        expect(tab).to_have_attribute('aria-selected', 'true')
 
     def download(self, name, filename):
         self.idle()
@@ -268,9 +288,10 @@ class Workflow:
             self.page.get_by_label('Rows', exact=True).fill('1')
             self.page.get_by_label('Columns', exact=True).fill('2')
         self.idle()
+        self.open_options('.size-layout-options', 'Orientation and layout')
         orientation = self.page.get_by_role('combobox', name='Finished orientation', exact=True)
         slot = self.layouts[-1]['placements'][0]
-        current = 'Landscape' if slot['finishedWidth'] > slot['finishedHeight'] else 'Portrait'
+        current = 'Landscape' if self.layouts[-1]['finishedCutSize']['width'] > self.layouts[-1]['finishedCutSize']['height'] else 'Portrait'
         expect(orientation).to_have_text(current)
         labels = ['Portrait', 'Landscape', 'Portrait'] if current == 'Landscape' else ['Landscape', 'Portrait', 'Landscape']
         for label in labels:
@@ -473,7 +494,11 @@ class Workflow:
                     line = next(line for block in page.get_text('dict')['blocks'] if 'lines' in block
                                 for line in block['lines'] if any(label in s['text'] for s in line['spans']))
                     source_rotation = (0, 90, 0, 270)[source_index]
-                    angle = math.radians(source_rotation + layout['rotationDegrees'] + (180 if side and rotate else 0))
+                    grid_rotation = layout['rotationDegrees']
+                    if side:
+                        mirror_x = ((edge == 'longEdge') != (sheet['width'] > sheet['height'])) != rotate
+                        grid_rotation = (0 if mirror_x else 180) - grid_rotation
+                    angle = math.radians(source_rotation + grid_rotation)
                     assert abs(line['dir'][0] - math.cos(angle)) < .001, line
                     assert abs(line['dir'][1] - math.sin(angle)) < .001, line
         assert layout['duplex']['flipEdge'] == edge

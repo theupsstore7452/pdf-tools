@@ -396,6 +396,25 @@ pub(crate) struct DuplexSettings {
     pub back_alignment: String,
 }
 
+impl DuplexSettings {
+    /// Axis used to turn the physical sheet; a whole-back turn swaps the axis.
+    pub(crate) fn mirrors_x(&self, sheet: SizeInches) -> bool {
+        let landscape = sheet.width > sheet.height;
+        let base = match self.flip_edge {
+            DuplexFlipEdge::LongEdge => !landscape,
+            DuplexFlipEdge::ShortEdge => landscape,
+        };
+        base != self.rotate_back_180
+    }
+
+    /// Reflect the layout's top direction as well as its position. Artwork is
+    /// rotated, never reflected: text must stay readable on the printed back.
+    pub(crate) fn back_rotation(&self, sheet: SizeInches, front_rotation: u16) -> u16 {
+        let baseline = if self.mirrors_x(sheet) { 360 } else { 540 };
+        (baseline - front_rotation % 360) % 360
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BleedSettings {

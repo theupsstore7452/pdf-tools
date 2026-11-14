@@ -11,6 +11,8 @@ import Json.Decode as D
 import Json.Encode as E
 import Main
 import Model exposing (..)
+import Organizer as O
+import Preview
 import RustWire
 import Test exposing (..)
 import Test.Html.Event as Event
@@ -43,7 +45,151 @@ source =
 tests : Test
 tests =
     describe "Validation and workspace transitions"
-        [ test "Theme toggle preserves working inputs"
+        [ test "Closing the organizer restores a retained layout after a failed replacement"
+            (\_ ->
+                let
+                    before =
+                        { initial | operation = Impose, source = source, layout = layout, layoutReady = False, pageOrganizer = True, error = "Could not replace artwork." }
+
+                    after =
+                        step ClosePages before
+                in
+                Expect.equal ( False, before.revision + 1, ( "", before.source ) ) ( after.pageOrganizer, after.revision, ( after.error, after.source ) )
+            )
+        , test "Both oversized dimension inputs keep their intended ratio across a fitted layout"
+            (\_ ->
+                let
+                    base =
+                        { initial | operation = Impose, source = source }
+
+                    first =
+                        base |> step (Field "finished-width" "72")
+
+                    fittedFirst =
+                        step (LayoutDue first.revision) first
+
+                    second =
+                        step (Field "finished-height" "48") fittedFirst
+
+                    fittedBoth =
+                        step (LayoutDue second.revision) second
+
+                    committed =
+                        step (BrowserEvent (E.object [ ( "action", E.string "finishedSizeCommitted" ) ])) fittedBoth
+
+                    editedAgain =
+                        step (Field "finished-width" "10") committed
+                in
+                Expect.equal ( { width = 18, height = 12 }, { width = 10, height = 12 } ) ( fittedBoth.request.finishedCutSize, editedAgain.request.finishedCutSize )
+            )
+        , test "Oversized landscape artwork uses the largest proportional fit, including a sheet quarter-turn"
+            (\_ ->
+                let
+                    r =
+                        initial.request
+
+                    large =
+                        { r | finishedCutSize = { width = 72, height = 48 } }
+
+                    fitted =
+                        I.fitToSheet large
+
+                    bleed =
+                        I.fitToSheet { large | bleedOption = A.BleedOptionScaleToBleed, createdBleedAmount = 0.125 }
+                in
+                Expect.all
+                    [ \_ -> Expect.equal { width = 18, height = 12 } fitted.finishedCutSize
+                    , \_ -> Expect.equal { width = 11, height = 7.333333 } (I.fitToSheet { large | parentSheetSize = { width = 8.5, height = 11 } }).finishedCutSize
+                    , \_ -> Expect.equal { width = 17.625, height = 11.75 } bleed.finishedCutSize
+                    , \_ -> Expect.equal r (I.fitToSheet r)
+                    ]
+                    ()
+            )
+        , test "Reordering keeps per-page artwork settings and repeat quantities with original pages"
+            (\_ ->
+                let
+                    r =
+                        initial.request
+
+                    override =
+                        { pageNumber = 2, rotationDegrees = 90, finishedCutSize = Nothing, artworkFit = Nothing }
+
+                    ordered =
+                        O.remapRequest [ 1, 2, 3 ] [ 3, 1, 2 ] { r | sourcePageCount = Just 3, impositionMode = A.ImpositionModeRepeat, impressionQuantities = Just [ 2, 4, 6 ], pageOverrides = [ override ] }
+                in
+                Expect.equal ( Just [ 6, 2, 4 ], [ 3 ] ) ( ordered.impressionQuantities, List.map .pageNumber ordered.pageOverrides )
+            )
+        , test "Duplex quantities follow intact pairs; new front/back pairs start with one copy"
+            (\_ ->
+                let
+                    r =
+                        I.setSides A.SidesDouble { request | sourcePageCount = Just 4, impositionMode = A.ImpositionModeRepeat }
+
+                    request =
+                        initial.request
+
+                    before =
+                        { r | impressionQuantities = Just [ 3, 7 ] }
+                in
+                Expect.equal ( Just [ 7, 3 ], Just [ 1, 1 ] ) ( (O.remapRequest [ 1, 2, 3, 4 ] [ 3, 4, 1, 2 ] before).impressionQuantities, (O.remapRequest [ 1, 2, 3, 4 ] [ 1, 3, 2, 4 ] before).impressionQuantities )
+            )
+        , test "A cancelled page draft leaves the committed order intact"
+            (\_ ->
+                let
+                    before =
+                        { initial | pageOrder = [ 3, 1, 2 ], pageDraft = [ 2, 1, 3 ], pageOrganizer = True }
+
+                    after =
+                        step ClosePages before
+                in
+                Expect.equal ( [ 3, 1, 2 ], False ) ( after.pageOrder, after.pageOrganizer )
+            )
+        , test "Duplex rotates sideways backs in the opposite direction without reflecting artwork"
+            (\_ ->
+                case layout of
+                    Just l ->
+                        let
+                            portrait edge rotation =
+                                { l | parentSheetSize = { width = 12, height = 18 }, rotationDegrees = rotation, duplex = Just { flipEdge = edge, rotateBack180 = False, backAlignment = "" } }
+
+                            landscape edge rotation =
+                                { l | parentSheetSize = { width = 18, height = 12 }, rotationDegrees = rotation, duplex = Just { flipEdge = edge, rotateBack180 = False, backAlignment = "" } }
+                        in
+                        Expect.equal [ 0, 270, 180, 90, 180, 90, 0, 270 ]
+                            (List.map (\result -> I.sideRotation result True)
+                                [ portrait A.DuplexFlipEdgeLongEdge 0
+                                , portrait A.DuplexFlipEdgeLongEdge 90
+                                , portrait A.DuplexFlipEdgeShortEdge 0
+                                , portrait A.DuplexFlipEdgeShortEdge 90
+                                , landscape A.DuplexFlipEdgeLongEdge 0
+                                , landscape A.DuplexFlipEdgeLongEdge 90
+                                , landscape A.DuplexFlipEdgeShortEdge 0
+                                , landscape A.DuplexFlipEdgeShortEdge 90
+                                ]
+                            )
+
+                    Nothing ->
+                        Expect.fail "Missing Rust layout fixture"
+            )
+        , test "Whole-back rotation updates the printer instruction and the finished pair proof"
+            (\_ ->
+                case layout of
+                    Just l ->
+                        let
+                            before =
+                                { l | duplex = Just { flipEdge = A.DuplexFlipEdgeLongEdge, rotateBack180 = True, backAlignment = "" } }
+
+                            model =
+                                { initial | display = Just { layout = before, urls = Dict.empty, sheet = 0, back = True, source = "source" } }
+                        in
+                        Preview.view model
+                            |> Query.fromHtml
+                            |> Query.has [ Selector.text "Print double-sided · Flip on short edge", Selector.text "Back sheet · PDF page 2", Selector.text "Front · Page 1", Selector.text "Back · Page 2" ]
+
+                    Nothing ->
+                        Expect.fail "Missing Rust layout fixture"
+            )
+        , test "Theme toggle preserves working inputs"
             (\_ ->
                 let
                     before =

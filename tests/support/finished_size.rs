@@ -127,6 +127,7 @@ async fn finished_size_source_binding_and_labeled_asymmetric_duplex_pixels_match
             let back = render(1);
             color(&front, 2.0, 2.0, [255, 0, 0]);
             color(&front, 2.0, 4.0, [0, 0, 255]);
+            let artwork_rotated = (edge == "shortEdge") != rotate;
             let mirror_x = (edge == "longEdge") != rotate;
             let mirror_y = (edge == "longEdge") == rotate;
             let bx = if mirror_x { 6.75 } else { 1.0 };
@@ -135,13 +136,21 @@ async fn finished_size_source_binding_and_labeled_asymmetric_duplex_pixels_match
                 &back,
                 bx + 1.0,
                 by + 1.0,
-                if rotate { [255, 255, 0] } else { [0, 255, 0] },
+                if artwork_rotated {
+                    [255, 255, 0]
+                } else {
+                    [0, 255, 0]
+                },
             );
             color(
                 &back,
                 bx + 1.0,
                 by + 3.0,
-                if rotate { [0, 255, 0] } else { [255, 255, 0] },
+                if artwork_rotated {
+                    [0, 255, 0]
+                } else {
+                    [255, 255, 0]
+                },
             );
             // Cover + created bleed fills the whole clip even at opposite edge anchors.
             color(&front, 1.04, 1.04, [255, 0, 0]);
@@ -149,7 +158,11 @@ async fn finished_size_source_binding_and_labeled_asymmetric_duplex_pixels_match
                 &back,
                 bx + 0.04,
                 by + 0.04,
-                if rotate { [255, 255, 0] } else { [0, 255, 0] },
+                if artwork_rotated {
+                    [255, 255, 0]
+                } else {
+                    [0, 255, 0]
+                },
             );
         }
     }
@@ -419,4 +432,143 @@ async fn manual_bleed_expands_preview_to_actual_media_artwork_without_changing_d
     let unchanged = send(state.clone(), get_request(&url)).await;
     let unchanged = image::load_from_memory(&body_bytes(unchanged).await).unwrap();
     assert_eq!(unchanged.to_rgba8(), default.to_rgba8());
+}
+
+/// Check the physical result, independently of the preview/export rotation
+/// helpers: turn the sheet, cut a piece, and its top must meet the front's top.
+#[tokio::test]
+#[serial(pdfium)]
+async fn duplex_cut_pieces_keep_matching_tops_and_pairs_in_partial_grids() {
+    let Some(state) = state_or_skip() else {
+        return;
+    };
+    let mut source = LoDocument::with_version("1.7");
+    let pages_id = source.new_object_id();
+    let mut ids = Vec::new();
+    for pair in 0..11 {
+        for _ in 0..2 {
+            let green = (pair + 1) as f64 / 12.0;
+            let content = format!("1 0 0 rg 0 162 144 54 re f 0 0 1 rg 0 0 144 54 re f 0 {green} 0 rg 0 54 144 108 re f");
+            let stream = source.add_object(Stream::new(Dictionary::new(), content.into_bytes()));
+            ids.push(
+                source.add_object(dictionary! {"Type"=>"Page", "Parent"=>pages_id,
+                "MediaBox"=>vec![0.into(),0.into(),144.into(),216.into()],
+                "Contents"=>stream, "Resources"=>Dictionary::new()}),
+            );
+        }
+    }
+    source.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! {"Type"=>"Pages", "Count"=>22,
+        "Kids"=>ids.into_iter().map(Object::Reference).collect::<Vec<_>>()}),
+    );
+    let root = source.add_object(dictionary! {"Type"=>"Catalog", "Pages"=>pages_id});
+    source.trailer.set("Root", root);
+    let mut bytes = Vec::new();
+    source.save_to(&mut bytes).unwrap();
+    for (width, height) in [(12.0, 18.0), (18.0, 12.0)] {
+        for rotation in [0, 90] {
+            for edge in ["longEdge", "shortEdge"] {
+                for rotate in [false, true] {
+                    let request = serde_json::json!({"sourcePdfSize":{"width":2.0,"height":3.0},
+                        "sourcePageCount":22,"finishedCutSize":{"width":2.0,"height":3.0},
+                        "parentSheetSize":{"width":width,"height":height},"quantityRequested":11,
+                        "impositionMode":"unique","sides":"double","orientationPreference":"auto",
+                        "duplex":{"flipEdge":edge,"rotateBack180":rotate},"layoutMode":"manual",
+                        "manual":{"rows":4,"columns":3,"rotationDegrees":rotation,"margins":null},
+                        "gutter":{"horizontal":0.0,"vertical":0.0},"bleedOption":"useAsIs"});
+                    let response = send(
+                        state.clone(),
+                        json_request("/gang-up/layout", request.clone()),
+                    )
+                    .await;
+                    assert_eq!(
+                        response.status(),
+                        StatusCode::OK,
+                        "{}",
+                        body_text(response).await
+                    );
+                    let response = send(
+                        state.clone(),
+                        json_request("/gang-up/layout", request.clone()),
+                    )
+                    .await;
+                    let layout: serde_json::Value =
+                        serde_json::from_slice(&body_bytes(response).await).unwrap();
+                    assert_eq!(layout["rotationDegrees"], rotation);
+                    let exported = send(
+                        state.clone(),
+                        multipart_request(
+                            "/gang-up/export",
+                            vec![
+                                text_part("layoutRequest", &request.to_string()),
+                                upload_part("file", "cards.pdf", bytes.clone()),
+                            ],
+                        ),
+                    )
+                    .await;
+                    assert_eq!(exported.status(), StatusCode::OK, "sheet {width}x{height}, rotation {rotation}, edge {edge}, extra turn {rotate}");
+                    let pdfium = state.pdfium();
+                    let doc = pdfium
+                        .load_pdf_from_byte_vec(body_bytes(exported).await, None)
+                        .unwrap();
+                    assert_eq!(doc.pages().len(), 2);
+                    let render = |i| {
+                        doc.pages()
+                            .get(i)
+                            .unwrap()
+                            .render_with_config(&PdfRenderConfig::new().scale_page_by_factor(1.0))
+                            .unwrap()
+                            .as_image()
+                            .unwrap()
+                    };
+                    let front = render(0);
+                    let back = render(1);
+                    // A physical left/right turn reverses x; a top/bottom turn
+                    // reverses y. The extra whole-sheet turn swaps those axes.
+                    let left_right = ((edge == "longEdge") != (width > height)) != rotate;
+                    for (pair, slot) in layout["placements"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .take(11)
+                        .enumerate()
+                    {
+                        let x = slot["finishedX"].as_f64().unwrap()
+                            + slot["finishedWidth"].as_f64().unwrap() / 2.0;
+                        let y = slot["finishedY"].as_f64().unwrap()
+                            + slot["finishedHeight"].as_f64().unwrap() / 2.0;
+                        let (vx, vy) = if rotation == 0 {
+                            (0.0, -1.125)
+                        } else {
+                            (1.125, 0.0)
+                        };
+                        let bx = if left_right { width - x } else { x };
+                        let by = if left_right { y } else { height - y };
+                        let bvx = if left_right { -vx } else { vx };
+                        let bvy = if left_right { vy } else { -vy };
+                        color(&front, x + vx, y + vy, [255, 0, 0]);
+                        color(&back, bx + bvx, by + bvy, [255, 0, 0]);
+                        color(&back, bx - bvx, by - bvy, [0, 0, 255]);
+                        let identity = [0, (((pair + 1) as f64 / 12.0) * 255.0).round() as u8, 0];
+                        color(&front, x, y, identity);
+                        color(&back, bx, by, identity);
+                    }
+                    // The twelfth slot remains blank on both sides.
+                    let blank = &layout["placements"][11];
+                    let x = blank["finishedX"].as_f64().unwrap()
+                        + blank["finishedWidth"].as_f64().unwrap() / 2.0;
+                    let y = blank["finishedY"].as_f64().unwrap()
+                        + blank["finishedHeight"].as_f64().unwrap() / 2.0;
+                    color(&front, x, y, [255, 255, 255]);
+                    color(
+                        &back,
+                        if left_right { width - x } else { x },
+                        if left_right { y } else { height - y },
+                        [255, 255, 255],
+                    );
+                }
+            }
+        }
+    }
 }

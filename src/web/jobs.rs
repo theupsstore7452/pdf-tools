@@ -19,6 +19,7 @@ pub(crate) fn create_staged_prepare(
     state: Arc<AppState>,
     staged: StagedImposeForm,
     operation_permit: OperationPermit,
+    page_workspace: bool,
 ) -> AppResult<Response> {
     let created_job = state.jobs.create_cancellable()?;
     let job_id = created_job.id;
@@ -43,13 +44,23 @@ pub(crate) fn create_staged_prepare(
         let _ = worker_state
             .jobs
             .update(&worker_job_id, 21, "Upload staged on disk");
-        let result = gang_up::prepare_staged_source(
-            worker_state.clone(),
-            staged,
-            operation_permit,
-            Some(progress),
-        )
-        .await;
+        let result = if page_workspace {
+            super::pages::prepare_staged(
+                worker_state.clone(),
+                staged,
+                operation_permit,
+                Some(progress),
+            )
+            .await
+        } else {
+            gang_up::prepare_staged_source(
+                worker_state.clone(),
+                staged,
+                operation_permit,
+                Some(progress),
+            )
+            .await
+        };
         finish_prepare_job(&worker_state, &worker_job_id, &cancellation, result);
     });
     spawn_staged_prepare_monitor(monitor_jobs, monitor_job_id, worker);

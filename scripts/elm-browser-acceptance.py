@@ -105,6 +105,19 @@ class Suite:
     def button(self, name):
         if name == 'Clear':
             return self.workspace_command('Clear workspace')
+        if name == 'Continue':
+            return self.page.locator('.setup-continue-button')
+        if name == 'Back':
+            return self.page.locator('.setup-back-button')
+        if name in ['Organize pages', 'Presets']:
+            self.artwork_tools()
+        if name in ['Custom grid', 'Max per sheet']:
+            self.open_options('.size-layout-options', 'Orientation and layout')
+        if name in ['Keep fitted placement', 'Scale to add bleed', 'Use auto-detected bleed']:
+            self.open_options('.trim-options', 'Trim and bleed options')
+        if name == 'Show guides':
+            self.open_options('.preview-guide-options', 'Guide options')
+        name = {'Individual': 'One PDF per page', 'Combined': 'One PDF', 'Chunks': 'Page groups', 'Fit sheet': 'Fit to sheet', 'Next: Bleed': 'Next: Review'}.get(name, name)
         if name.startswith('Move ') and name.rsplit(' ', 1)[-1] in ['up', 'down']:
             filename, direction = name[5:].rsplit(' ', 1)
             name = 'Move ' + direction + ': ' + filename
@@ -197,7 +210,8 @@ class Suite:
         trigger.press('Enter')
         menu = self.page.get_by_role('menu', name='Workspace actions')
         expect(menu).to_be_visible()
-        expect(menu.get_by_role('menuitem')).to_have_count(3)
+        expect(menu.get_by_role('menuitem')).to_have_count(4)
+        expect(menu.get_by_role('menuitem', name='Organize pages',exact=True)).to_be_visible()
         expect(menu.get_by_role('menuitem', name='Add files')).to_be_focused()
         self.page.keyboard.press('End')
         expect(menu.get_by_role('menuitem').last).to_be_focused()
@@ -232,8 +246,8 @@ class Suite:
         self.checks.append('workspace controls: DA command menu with adjacent theme toggle, keyboard navigation/dismissal, clear cancellation/focus, page range/all pages, equal setup tabs')
 
     def theme(self):
-        for saved, expected in [(None, 'dark'), ('invalid', 'dark'), ('light', 'light'), ('dark', 'dark'), ('blocked', 'dark')]:
-            context = self.browser.new_context(color_scheme='light', viewport={'width': 390, 'height': 700})
+        for saved, expected in [(None, 'light'), ('invalid', 'light'), ('light', 'light'), ('dark', 'dark'), ('blocked', 'light')]:
+            context = self.browser.new_context(color_scheme='dark', viewport={'width': 390, 'height': 700})
             if saved == 'blocked':
                 context.add_init_script("Object.defineProperty(window, 'localStorage', {get() {throw new Error('Storage unavailable')}})")
             elif saved is not None:
@@ -259,17 +273,17 @@ class Suite:
             expect(page.locator('html')).to_have_attribute('data-theme', expected)
             context.close()
 
-        context = self.browser.new_context(color_scheme='light')
+        context = self.browser.new_context(color_scheme='dark')
         page = context.new_page()
         page.goto(args.url)
         toggle = page.get_by_role('switch', name='Dark mode')
-        for theme in ['light', 'dark']:
+        for theme in ['dark', 'light']:
             toggle.click()
             page.reload()
             expect(page.locator('html')).to_have_attribute('data-theme', theme)
             expect(toggle).to_have_attribute('aria-checked', str(theme == 'dark').lower())
         context.close()
-        self.checks.append('theme: dark default on light OS, saved/invalid/unavailable storage, system changes, keyboard activation, both themes persist')
+        self.checks.append('theme: light default on dark OS, saved/invalid/unavailable storage, system changes, keyboard activation, both themes persist')
 
     def range(self, draft):
         self.button('Page range').click()
@@ -297,6 +311,7 @@ class Suite:
         self.idle()
 
     def step(self, name):
+        name = 'Review' if name == 'Bleed' else name
         tab = self.page.locator('.setup-stepper').get_by_role('tab', name=name, exact=True)
         tab.click()
         # Step navigation restores focus on the next animation frame. Opening a
@@ -306,6 +321,8 @@ class Suite:
         expect(tab).to_be_focused()
 
     def dropdown(self, name, value):
+        if name == 'Finished orientation':
+            self.open_options('.size-layout-options', 'Orientation and layout')
         if name == 'Apply preset' and not self.page.locator('.elm-presets-menu .da-popover').is_visible():
             self.presets()
         labels = {
@@ -330,7 +347,20 @@ class Suite:
         expect(radio).to_be_checked()
         expect(control.locator('input:checked')).to_have_count(1)
 
+    def open_options(self, selector, label):
+        details = self.page.locator(selector)
+        summary = details.locator('summary').first
+        expect(summary).to_have_text(label)
+        if details.get_attribute('open') is None:
+            summary.click()
+        expect(details).to_have_attribute('open', '')
+        return details
+
+    def artwork_tools(self):
+        return self.open_options('.toolbar-more', 'Artwork tools')
+
     def presets(self):
+        self.artwork_tools()
         # Let pending Elm updates and native popover toggles settle before
         # deciding whether to open; otherwise a second click can close it.
         self.page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
@@ -349,6 +379,10 @@ class Suite:
             trigger.click()
         expect(self.page.locator('.elm-presets-menu .da-popover')).to_be_hidden()
         expect(trigger).to_have_attribute('aria-expanded', 'false')
+        details = self.page.locator('.toolbar-more')
+        if details.get_attribute('open') is not None:
+            details.locator('summary').first.click()
+        expect(details).not_to_have_attribute('open', '')
         self.page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
 
     def assert_pdf(self, path, labels, sizes=None):
@@ -606,6 +640,7 @@ class Suite:
         self.idle()
         expect(self.page.locator('#finished-width')).to_have_value('3')
         expect(self.page.locator('#finished-height')).to_have_value('2')
+        self.open_options('.size-layout-options', 'Orientation and layout')
         expect(self.page.get_by_role('combobox', name='Finished orientation', exact=True)).to_be_enabled()
         self.page.locator('#finished-width').fill('3')
         self.page.locator('#finished-height').fill('2')
@@ -658,6 +693,7 @@ class Suite:
         self.idle()
         expect(self.page.locator('#finished-width')).to_have_value('5')
         expect(self.page.locator('#finished-height')).to_have_value('7')
+        self.open_options('.size-layout-options', 'Orientation and layout')
         expect(self.page.get_by_role('combobox', name='Finished orientation', exact=True)).to_have_text('Portrait')
         assert self.layouts[-1]['finishedCutSize'] == {'width': 5, 'height': 7}
         self.step('Bleed')
@@ -691,10 +727,11 @@ class Suite:
         self.switch('Impose artwork')
         tabs = self.page.get_by_role('tablist', name='Print setup options')
         expect(tabs.get_by_role('tab')).to_have_count(3)
-        expect(tabs.get_by_role('tab')).to_have_text(['Size', 'Sheet', 'Bleed'])
+        expect(tabs.get_by_role('tab')).to_have_text(['Size', 'Sheet', 'Review'])
         self.step('Size')
         panel = self.page.get_by_role('tabpanel', name='Size', exact=True)
-        expect(panel.get_by_role('heading', name='Arrangement', exact=True)).to_be_visible()
+        self.open_options('.size-layout-options', 'Orientation and layout')
+        expect(panel.get_by_role('group', name='Sheet arrangements', exact=True)).to_be_visible()
         self.button('Custom grid').click()
         self.page.get_by_label('Rows', exact=True).fill('1')
         self.page.get_by_label('Columns', exact=True).fill('2')
@@ -702,7 +739,7 @@ class Suite:
         self.step('Size')
         expect(self.page.get_by_label('Rows', exact=True)).to_have_value('1')
         expect(self.page.get_by_label('Columns', exact=True)).to_have_value('2')
-        for name in ['Bleed', 'Sheet', 'Size']:
+        for name in ['Review', 'Sheet', 'Size']:
             tab = tabs.get_by_role('tab', name=name, exact=True)
             expect(tab).to_be_enabled()
             tab.click()
@@ -718,7 +755,7 @@ class Suite:
         self.step('Size')
         expect(self.page.locator('#finished-width')).to_have_value('4.')
         expect(self.page.locator('#finished-width')).to_have_attribute('aria-invalid', 'true')
-        keys = [('ArrowLeft', 'Bleed'), ('ArrowRight', 'Size'), ('End', 'Bleed'), ('Home', 'Size'), ('ArrowRight', 'Sheet')]
+        keys = [('ArrowLeft', 'Review'), ('ArrowRight', 'Size'), ('End', 'Review'), ('Home', 'Size'), ('ArrowRight', 'Sheet')]
         tabs.get_by_role('tab', name='Size', exact=True).focus()
         for key, name in keys:
             self.page.keyboard.press(key)
@@ -762,7 +799,7 @@ class Suite:
                 header:bounds('.app-header'), card:bounds('.ready-card'),
                 tabs:bounds('.setup-stepper'), fields:bounds('.gang-setup-fields'),
                 footer:bounds('.elm-setup-actions'),
-                action:bounds('.setup-continue-button'),
+                action:bounds('.setup-continue-button, .setup-download-button'),
                 back:document.querySelector('.elm-setup-actions .ghost-button')?.getBoundingClientRect().x,
                 step:document.querySelector('.setup-stepper [aria-selected=true] .setup-step-label').textContent,
                 scrollX, scrollY
@@ -791,7 +828,7 @@ class Suite:
               return color('.elm-setup') === color('.setup-stepper') &&
                      color('.elm-setup') === color('.elm-setup-actions');
             }'''), (width, height, 'Setup navigation must share the rail background')
-            assert {frame['step'] for frame in frames} == {'Size', 'Sheet', 'Bleed'}, (width, height, 'Steps did not all render')
+            assert {frame['step'] for frame in frames} == {'Size', 'Sheet', 'Review'}, (width, height, 'Steps did not all render')
             for frame in frames:
                 footer, action = frame['footer'], frame['action']
                 assert abs(action['x'] + action['width'] - (footer['x'] + footer['width'] - 12)) < 1, (width, height, 'Primary action must stay right', frame)
@@ -880,31 +917,29 @@ class Suite:
                 expect(self.button('Move a.pdf up')).to_be_disabled()
                 expect(self.button('Move b.pdf down')).to_be_disabled()
                 self.page.screenshot(path=str(self.out/f'artwork-rows-{theme}-{width}x{height}.png'))
-                back, forward = self.button('Back'), self.button('Continue')
                 first_footer = self.page.locator('.elm-setup-actions').bounding_box()
-                for index, name in enumerate(['Size', 'Sheet', 'Bleed']):
+                for index, name in enumerate(['Size', 'Sheet', 'Review']):
                     expect(self.page.get_by_role('tabpanel', name=name, exact=True)).to_be_visible()
-                    for arrow in [back, forward]:
-                        expect(arrow).to_be_visible()
-                        assert arrow.inner_text() == ''
-                        expect(arrow.locator('svg')).to_have_attribute('aria-hidden', 'true')
-                        assert arrow.get_attribute('title')
-                    expect(back).to_be_disabled() if index == 0 else expect(back).to_be_enabled()
-                    expect(forward).to_be_disabled() if index == 2 else expect(forward).to_be_enabled()
-                    footer = self.page.locator('.elm-setup-actions').bounding_box()
+                    actions = self.page.locator('.elm-setup-actions')
+                    labels = [['Next: Sheet'], ['Back: Size', 'Next: Review'], ['Back: Sheet', 'Download imposed PDF']][index]
+                    expect(actions.get_by_role('button')).to_have_text(labels)
+                    for label in labels:
+                        action = self.button(label)
+                        expect(action).to_be_visible()
+                        expect(action).to_be_enabled()
+                        if label != 'Download imposed PDF':
+                            expect(action.locator('svg')).to_have_attribute('aria-hidden', 'true')
+                    expect(self.button('Back')).to_have_count(0 if index == 0 else 1)
+                    expect(self.button('Continue')).to_have_count(0 if index == 2 else 1)
+                    expect(self.button('Download imposed PDF')).to_have_count(1 if index == 2 else 0)
+                    footer = actions.bounding_box()
                     assert all(abs(footer[key] - first_footer[key]) < 1 for key in footer), (theme, width, name)
-                    if index == 0:
-                        back.evaluate('e => e.click()')
-                        expect(self.page.get_by_role('tab', name='Size', exact=True)).to_have_attribute('aria-selected', 'true')
                     if index < 2:
-                        forward.click()
-                    else:
-                        forward.evaluate('e => e.click()')
-                        expect(self.page.get_by_role('tab', name='Bleed', exact=True)).to_have_attribute('aria-selected', 'true')
-                        expect(self.button('Download imposed PDF')).to_be_visible()
-                self.page.screenshot(path=str(self.out/f'setup-arrows-{theme}-{width}x{height}.png'))
+                        self.button(labels[-1]).click()
+                        expect(self.page.get_by_role('tab', name=['Sheet', 'Review'][index], exact=True)).to_be_focused()
+                self.page.screenshot(path=str(self.out/f'setup-actions-{theme}-{width}x{height}.png'))
                 for name in ['Sheet', 'Size']:
-                    back.click()
+                    self.button('Back: ' + name).click()
                     expect(self.page.get_by_role('tab', name=name, exact=True)).to_be_focused()
         self.page.set_viewport_size({'width': 1366, 'height': 900})
         # Exercise the polished cards' actual file actions, including focus after reorder.
@@ -926,9 +961,9 @@ class Suite:
         try:
             self.select(long_pdf, append=True)
             expect(self.button('Cancel inspection')).to_be_visible()
-            expect(self.button('Back')).to_be_disabled()
-            expect(self.button('Continue')).to_be_disabled()
-            self.button('Continue').evaluate('e => e.click()')
+            expect(self.button('Back')).to_have_count(0)
+            expect(self.button('Next: Sheet')).to_be_disabled()
+            self.button('Next: Sheet').evaluate('e => e.click()')
             expect(self.page.get_by_role('tab', name='Size', exact=True)).to_have_attribute('aria-selected', 'true')
         finally:
             for route, response in pending:
@@ -936,7 +971,7 @@ class Suite:
             self.page.unroute('**/pdf/inspect')
         self.idle()
         expect(self.button('Continue')).to_be_enabled()
-        self.checks.append('setup polish: continuous desktop header divider; rounded, spaced artwork cards and long filenames; reorder/remove and keyboard focus; persistent accessible arrows, disabled endpoints, stable footer and separate download in both themes at desktop/short/tablet/390px/320px')
+        self.checks.append('setup polish: continuous desktop header divider; rounded, spaced artwork cards and long filenames; reorder/remove and keyboard focus; visible labeled Next/Back actions with decorative arrows, absent endpoint actions, final download, disabled navigation while busy, stable footer in both themes at desktop/short/tablet/390px/320px')
 
     def copy_quantities(self):
         for theme in ['light', 'dark']:
@@ -1083,11 +1118,12 @@ class Suite:
             geometry = toolbar.evaluate('''e => {
               const r = e.getBoundingClientRect(), previous = e.querySelector('.previous').getBoundingClientRect(), next = e.querySelector('.next').getBoundingClientRect();
               return {x:r.x, y:r.y, width:r.width, height:r.height,
-                rightAligned:Math.abs(e.querySelector('.elm-presets-menu').getBoundingClientRect().right - (r.left + Math.max(e.clientWidth,e.scrollWidth) - e.scrollLeft - parseFloat(getComputedStyle(e).paddingRight))) < 2,
-                oneRow:[...e.querySelectorAll('#impose-presets-trigger, .artwork-fitting .da-radio-group__options, .preview-side-controls button, .sheet-nav-status, .sheet-nav-button')].every(control => Math.abs(control.getBoundingClientRect().top + control.getBoundingClientRect().height/2 - (previous.top+previous.height/2)) < 2),
+                rightAligned:Math.abs(e.querySelector('.elm-preview-controls').getBoundingClientRect().right - (r.right - parseFloat(getComputedStyle(e).paddingRight))) < 2,
+                oneRow:[...e.querySelectorAll('.sheet-nav-status, .sheet-nav-button')].every(control => Math.abs(control.getBoundingClientRect().top + control.getBoundingClientRect().height/2 - (previous.top+previous.height/2)) < 2),
+                contained:[...e.querySelectorAll('.artwork-fitting, .toolbar-more > summary, .sheet-nav-status, .sheet-nav-button')].every(control => {const b=control.getBoundingClientRect(); return b.left >= r.left - 1 && b.right <= r.right + 1 && b.top >= r.top - 1 && b.bottom <= r.bottom + 1;}),
                 adjacent:Math.abs(previous.top - next.top) < 1 && previous.right <= next.left};
             }''')
-            assert geometry['rightAligned'] and geometry['adjacent'] and geometry['oneRow'], (width, height, geometry)
+            assert geometry['rightAligned'] and geometry['adjacent'] and geometry['oneRow'] and geometry['contained'], (width, height, geometry)
             assert_paths()
             before = toolbar.bounding_box()
             self.button('Next sheet').click()
@@ -1102,11 +1138,38 @@ class Suite:
             assert_paths()
             after = toolbar.bounding_box()
             assert all(abs(after[key] - before[key]) < 1 for key in before), (width, height, 'Sheet navigation moves the toolbar')
-            for name in ['Zoom in', 'Zoom out', 'Fit sheet', 'Hide setup toolbar', 'Show setup toolbar']:
+            for name in ['Hide setup toolbar', 'Show setup toolbar']:
                 expect(self.button(name)).to_have_count(0)
+            guides = self.page.locator('.preview-guide-options')
+            expect(guides).not_to_have_attribute('open', '')
+            expect(guides.locator('.preview-guide-controls')).to_be_hidden()
+            for name in ['Zoom in', 'Zoom out', 'Fit to sheet']:
+                expect(self.button(name)).to_be_visible()
+            canvas = self.page.locator('.preview-sheet-canvas')
+            expect(canvas).to_have_attribute('data-preview-zoom', '100')
+            expect(self.button('Zoom out')).to_be_disabled()
+            expect(self.button('Fit to sheet')).to_be_disabled()
+            work = (len(self.layouts), len(self.batch_sizes))
+            for zoom in [150, 200, 300]:
+                self.button('Zoom in').click()
+                expect(canvas).to_have_attribute('data-preview-zoom', str(zoom))
+            expect(self.button('Zoom in')).to_be_disabled()
+            self.button('Zoom out').click()
+            expect(canvas).to_have_attribute('data-preview-zoom', '200')
+            self.button('Fit to sheet').click()
+            expect(canvas).to_have_attribute('data-preview-zoom', '100')
+            self.button('Show guides').click()
+            expect(self.button('Show guides')).to_have_attribute('aria-pressed', 'false')
+            expect(self.page.locator('.piece-cut-path, .piece-bleed-bound')).to_have_count(0)
+            self.button('Show guides').click()
+            expect(self.button('Show guides')).to_have_attribute('aria-pressed', 'true')
+            self.page.wait_for_timeout(250)
+            assert (len(self.layouts), len(self.batch_sizes)) == work, 'Inspection controls triggered server work'
             style = self.page.locator('.piece-cut-path').first.evaluate('e => { const s=getComputedStyle(e); return {width:s.strokeWidth, vector:s.vectorEffect, dash:s.strokeDasharray, color:s.stroke}; }')
             assert style == {'width':'1.5px', 'vector':'non-scaling-stroke', 'dash':'6px, 4px', 'color':'rgb(214, 40, 40)'}, style
             assert_paths()
+            guides.locator('summary').first.click()
+            expect(guides).not_to_have_attribute('open', '')
             self.page.screenshot(path=str(self.out/f'preview-toolbar-{width}x{height}.png'))
         # The side toggle adds another toolbar control; keep setup usable on
         # narrow screens as well as checking simplex navigation above.
@@ -1130,7 +1193,7 @@ class Suite:
             assert self.page.locator('.gang-setup-fields').bounding_box()['height'] > 60, (width, height, 'Duplex toolbar collapses setup')
             self.page.screenshot(path=str(self.out/f'preview-duplex-toolbar-{width}x{height}.png'))
         self.page.set_viewport_size({'width': 1366, 'height': 900})
-        self.checks.append('preview toolbar: always-visible cut paths without guide toggles or cut lines, stable single-row navigation, complete paths across sheets/duplex, presets at far right, no zoom or collapse controls at desktop/tablet/mobile/breakpoints')
+        self.checks.append('preview toolbar: default cut paths and bleed outlines, stable responsive sheet navigation at far right, complete paths across sheets/duplex, bounded local-only zoom/fit and guide toggle, no collapse controls at desktop/tablet/mobile/breakpoints')
 
     def preset_toolbar(self):
         self.page.set_viewport_size({'width': 1366, 'height': 900})
@@ -1142,6 +1205,14 @@ class Suite:
         self.page.get_by_label('Copies', exact=True).fill('61')
         self.idle()
         menu = self.page.locator('.elm-presets-menu')
+        tools = self.page.locator('.toolbar-more')
+        summary = tools.locator('summary').first
+        expect(summary).to_have_text('Artwork tools')
+        expect(tools).not_to_have_attribute('open', '')
+        summary.focus()
+        summary.press('Enter')
+        expect(tools).to_have_attribute('open', '')
+        expect(tools.get_by_role('button', name='Organize pages', exact=True)).to_be_visible()
         trigger = self.page.get_by_role('button', name='Presets', exact=True)
         trigger.focus()
         trigger.press('Space')
@@ -1153,7 +1224,7 @@ class Suite:
             ('21 business cards', 3.5, 2, 7, 3, 'Size'),
             ('4 5x7', 5, 7, 2, 2, 'Sheet'),
             ('2 Letter', 8.5, 11, 2, 1, 'Sheet'),
-            ('4 4x6', 4, 6, 2, 2, 'Bleed'),
+            ('4 4x6', 4, 6, 2, 2, 'Review'),
         ]
         for label, width, height, rows, columns, save_step in workflows:
             self.step('Size')
@@ -1583,6 +1654,7 @@ class Suite:
         assert raster(old_url).getpixel((0,0))[0]>220
         pending=[]
         self.page.route('**/gang-up/sources/*/previews',lambda route: pending.append((route,route.fetch())))
+        self.open_options('.trim-options', 'Trim and bleed options')
         self.page.locator('.bleed-status').click()
         self.page.get_by_label('PDF bleed per side (in)',exact=True).fill('0.125')
         self.button('Use auto-detected bleed').wait_for()
@@ -1599,6 +1671,7 @@ class Suite:
             attempts.append(route.request.post_data_json)
             route.fulfill(status=503,body='Controlled preview failure')
         self.page.route('**/gang-up/sources/*/previews',fail_preview)
+        self.open_options('.trim-options', 'Trim and bleed options')
         self.page.locator('.bleed-status').click()  # Change identity to an uncached amount below.
         self.page.get_by_label('PDF bleed per side (in)',exact=True).fill('0.2')
         expect(self.button('Retry preview')).to_be_visible(timeout=30000)

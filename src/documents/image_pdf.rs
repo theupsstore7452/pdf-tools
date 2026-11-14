@@ -16,7 +16,6 @@ use crate::{
 const PT_PER_IN: f32 = 72.0;
 const IMAGE_DPI: f32 = 300.0;
 const MAX_PARALLEL_IMAGE_PREP_BYTES: usize = 256 * 1024 * 1024;
-pub(crate) const MAX_SINGLE_IMAGE_INPUT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_SINGLE_IMAGE_WORKING_BYTES: usize = 256 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -483,7 +482,6 @@ fn prepare_image_batch(
 }
 
 fn preflight_image(file: UploadFile) -> AppResult<ImagePreflight> {
-    validate_image_input_size(&file.filename, file.bytes.len())?;
     let format = match image::guess_format(&file.bytes) {
         Ok(image::ImageFormat::Jpeg) => SupportedImageFormat::Jpeg,
         Ok(image::ImageFormat::Png) => SupportedImageFormat::Png,
@@ -536,16 +534,6 @@ fn preflight_image(file: UploadFile) -> AppResult<ImagePreflight> {
         working_bytes,
         orientation,
     })
-}
-
-pub(crate) fn validate_image_input_size(filename: &str, byte_len: usize) -> AppResult<()> {
-    if byte_len > MAX_SINGLE_IMAGE_INPUT_BYTES {
-        return Err(AppError::payload_too_large(format!(
-            "image `{filename}` exceeds the {} MiB compressed input limit",
-            MAX_SINGLE_IMAGE_INPUT_BYTES / (1024 * 1024)
-        )));
-    }
-    Ok(())
 }
 
 fn checked_image_working_bytes(
@@ -1427,14 +1415,16 @@ mod tests {
     }
 
     #[test]
-    fn image_preflight_rejects_oversized_compressed_input_without_allocating_it() {
-        let error =
-            validate_image_input_size("oversized-card.png", MAX_SINGLE_IMAGE_INPUT_BYTES + 1)
-                .unwrap_err();
-
-        let message = error.to_string();
-        assert!(message.contains("oversized-card.png"));
-        assert!(message.contains("64 MiB compressed input limit"));
+    fn image_preflight_accepts_input_larger_than_the_previous_64_mib_cap() {
+        let mut bytes = sample_png_bytes_with_size(2, 2);
+        // Valid trailing data increases the file size without increasing the
+        // decoded pixel buffer, which retains its separate resource guard.
+        bytes.resize(64 * 1024 * 1024 + 1, 0);
+        assert!(preflight_image(UploadFile {
+            filename: "large.png".to_string(),
+            bytes: bytes.into(),
+        })
+        .is_ok());
     }
 
     #[test]

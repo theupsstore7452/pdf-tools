@@ -13,6 +13,7 @@ import Job
 import Json.Decode as D
 import Json.Encode as E
 import Model exposing (..)
+import Organizer as O
 import Process
 import Task
 import Time
@@ -38,6 +39,7 @@ init theme =
       , pending = []
       , nextId = 1
       , operation = PdfImage
+      , preferredTool = Nothing
       , busy = False
       , phase = ""
       , progress = 0
@@ -56,6 +58,22 @@ init theme =
       , outputMode = "individual"
       , chunk = "10"
       , request = I.initial
+      , pageOrder = []
+      , pageDraft = []
+      , pageOrganizer = False
+      , pageSource = Nothing
+      , pageSourceOwned = False
+      , pageSourceOrder = []
+      , pageThumbnails = Dict.empty
+      , pageBatch = 0
+      , pageSelected = 1
+      , pagePosition = "1"
+      , pageToken = 0
+      , pageLoading = False
+      , pageError = ""
+      , pageOrderState = Reorderable.initial
+      , sizeInput = Nothing
+      , sizeNotice = ""
       , source = Nothing
       , revision = 0
       , layout = Nothing
@@ -64,6 +82,8 @@ init theme =
       , previewToken = 0
       , previewLoading = False
       , previewError = ""
+      , previewZoom = 100
+      , previewGuides = True
       , sheet = 0
       , back = False
       , step = 0
@@ -98,7 +118,7 @@ init theme =
 
 subscriptions : Model -> Sub Msg
 subscriptions m =
-    Sub.batch [ browserEvents BrowserEvent, Time.every (10 * 60 * 1000) Lease, Http.track "job-upload" Uploaded, View.dropdownSubscriptions m ]
+    Sub.batch [ browserEvents BrowserEvent, Time.every (10 * 60 * 1000) Lease, Http.track "job-upload" Uploaded, Http.track "inspection" Uploaded, View.dropdownSubscriptions m ]
 
 
 bridge : String -> List ( String, E.Value ) -> Cmd Msg
@@ -162,7 +182,20 @@ jsonExpect tag decoder =
 
 request : String -> String -> Http.Body -> Http.Expect Msg -> Maybe String -> Cmd Msg
 request method url body response tracker =
-    Http.request { method = method, headers = [], url = url, body = body, expect = response, timeout = Just 120000, tracker = tracker }
+    Http.request
+        { method = method
+        , headers = []
+        , url = url
+        , body = body
+        , expect = response
+        , timeout =
+            if tracker == Just "job-upload" || tracker == Just "inspection" then
+                Nothing
+
+            else
+                Just 120000
+        , tracker = tracker
+        }
 
 
 delete : String -> Cmd Msg
@@ -193,6 +226,24 @@ intake append files m =
     else if List.any (\f -> not (isPdf f || isImage f)) files then
         ( { m | error = "Choose PDF, PNG, or JPEG files." }, Cmd.none )
 
+    else if List.isEmpty m.files && (m.preferredTool |> Maybe.map (\op -> not (List.member op (operations (List.indexedMap (\i f -> { id = i, file = f, pages = 0 }) files))))) == Just True then
+        ( { m
+            | error =
+                if m.preferredTool == Just Merge && List.length files < 2 && List.all isPdf files then
+                    "Choose at least two PDFs to combine, or select a different tool."
+
+                else if m.preferredTool == Just ImagePdf then
+                    "Choose PNG or JPEG images for Images to PDF, or select a different tool."
+
+                else if m.preferredTool == Just Split && List.length files /= 1 then
+                    "Choose one PDF to extract pages. To work with several PDFs, combine them first."
+
+                else
+                    "Choose PDF files for this tool, or select Impose artwork to use PDFs and images together."
+          }
+        , Cmd.none
+        )
+
     else
         let
             selected =
@@ -217,18 +268,37 @@ intake append files m =
 commitFiles : Model -> ( Model, Cmd Msg )
 commitFiles m =
     let
+        ( next, cmd ) =
+            commitNewFiles m
+    in
+    ( next
+    , Cmd.batch
+        [ cmd
+        , bridge "clearPageThumbnails" []
+        , if m.pageSourceOwned then
+            Maybe.map (\id -> delete ("gang-up/sources/" ++ id)) m.pageSource |> Maybe.withDefault Cmd.none
+
+          else
+            Cmd.none
+        ]
+    )
+
+
+commitNewFiles : Model -> ( Model, Cmd Msg )
+commitNewFiles m =
+    let
         available =
             operations m.pending
 
         op =
-            if not (List.isEmpty m.files) && List.member m.operation available then
+            if (not (List.isEmpty m.files) || m.preferredTool /= Nothing) && List.member m.operation available then
                 m.operation
 
             else
                 Maybe.withDefault Impose (List.head available)
 
         next =
-            { m | files = m.pending, pending = [], busy = False, phase = "", error = "", operation = op }
+            { m | files = m.pending, pending = [], busy = False, phase = "", error = "", operation = op, pageOrder = [], pageSource = Nothing, pageThumbnails = Dict.empty, pageOrganizer = False, pageSourceOwned = False, pageLoading = False, sizeInput = Nothing, sizeNotice = "", pageToken = m.pageToken + 1 }
     in
     if op == Impose then
         prepare
@@ -240,10 +310,17 @@ commitFiles m =
                     else
                         m.files
                 , pending = m.pending
+                , pageOrder = m.pageOrder
             }
 
     else
-        ( { next | source = Nothing, display = Nothing, layout = Nothing, layoutReady = False }
+        ( { next
+            | source = Nothing
+            , display = Nothing
+            , layout = Nothing
+            , layoutReady = False
+            , pageSource = Nothing
+          }
         , Cmd.batch [ Maybe.map (.sourceId >> (\id -> delete ("gang-up/sources/" ++ id))) m.source |> Maybe.withDefault Cmd.none, bridge "clearPreviews" [] ]
         )
 
@@ -258,13 +335,19 @@ prepare m =
     , request "POST"
         "gang-up/sources"
         (Http.multipartBody
-            (List.map (\f -> Http.filePart "file" f.file)
-                (if List.isEmpty m.pending then
-                    m.files
+            ((if List.isEmpty m.pending then
+                pageOrderParts m
 
-                 else
-                    m.pending
-                )
+              else
+                []
+             )
+                ++ List.map (\f -> Http.filePart "file" f.file)
+                    (if List.isEmpty m.pending then
+                        m.files
+
+                     else
+                        m.pending
+                    )
             )
         )
         (expect (Created next.epoch "prepare") Ok)
@@ -290,7 +373,14 @@ preview m =
                     m.previewToken + 1
 
                 pages =
-                    I.pagesForSheet layout m.sheet m.back
+                    (I.pagesForSheet layout m.sheet m.back
+                        ++ (if layout.duplex /= Nothing then
+                                [ False, True ] |> List.filterMap (\back -> I.pageNumber layout m.sheet back (Maybe.withDefault 0 m.selectedImpression))
+
+                            else
+                                []
+                           )
+                    )
                         |> (\xs ->
                                 if List.member m.selectedPage xs then
                                     xs
@@ -298,6 +388,15 @@ preview m =
                                 else
                                     xs ++ [ m.selectedPage ]
                            )
+                        |> List.foldl
+                            (\page xs ->
+                                if List.member page xs then
+                                    xs
+
+                                else
+                                    xs ++ [ page ]
+                            )
+                            []
             in
             ( { m | previewToken = token, previewLoading = True, previewError = "" }
             , bridge "preview" [ ( "token", E.int token ), ( "source", E.string source.sourceId ), ( "pages", E.list E.int pages ), ( "bleed", Maybe.map E.float layout.sourceBleedOverride |> Maybe.withDefault E.null ) ]
@@ -355,7 +454,7 @@ setNumber key draft m =
             m.request
 
         cut =
-            r.finishedCutSize
+            Maybe.withDefault r.finishedCutSize m.sizeInput
 
         sheet =
             r.parentSheetSize
@@ -445,7 +544,29 @@ setNumber key draft m =
             ( { m | drafts = Dict.insert ("invalid:" ++ key) issue drafts, revision = m.revision + 1, previewToken = m.previewToken + 1, previewLoading = False, layoutReady = False }, Cmd.batch [ Http.cancel "layout", bridge "cancelPreview" [] ] )
 
         Ok n ->
-            schedule { m | request = change n, drafts = Dict.remove ("invalid:" ++ key) drafts, chosenWidth = m.chosenWidth || key == "finished-width", chosenHeight = m.chosenHeight || key == "finished-height" }
+            let
+                changed =
+                    change n
+            in
+            schedule
+                { m
+                    | request = changed
+                    , sizeInput =
+                        if List.member key [ "finished-width", "finished-height" ] then
+                            Just changed.finishedCutSize
+
+                        else
+                            m.sizeInput
+                    , sizeNotice =
+                        if List.member key [ "finished-width", "finished-height" ] then
+                            ""
+
+                        else
+                            m.sizeNotice
+                    , drafts = Dict.remove ("invalid:" ++ key) drafts
+                    , chosenWidth = m.chosenWidth || key == "finished-width"
+                    , chosenHeight = m.chosenHeight || key == "finished-height"
+                }
 
 
 withQuantities : List Int -> A.LayoutRequest -> A.LayoutRequest
@@ -647,7 +768,187 @@ updateInternal msg m =
                 ( m, Cmd.none )
 
             else
-                ( m, File.Select.files [ "application/pdf", "image/png", "image/jpeg" ] (Picked append) )
+                ( m
+                , File.Select.files
+                    (if List.isEmpty m.files && m.preferredTool /= Nothing then
+                        case m.operation of
+                            ImagePdf ->
+                                [ "image/png", "image/jpeg" ]
+
+                            Impose ->
+                                [ "application/pdf", "image/png", "image/jpeg" ]
+
+                            _ ->
+                                [ "application/pdf" ]
+
+                     else
+                        [ "application/pdf", "image/png", "image/jpeg" ]
+                    )
+                    (Picked append)
+                )
+
+        OpenPages ->
+            openPages m
+
+        ClosePages ->
+            let
+                ( next, cmd ) =
+                    if m.busy then
+                        update Cancel m
+
+                    else
+                        ( m, Cmd.none )
+
+                closed =
+                    { next | pageOrganizer = False, pageThumbnails = Dict.empty, pageToken = m.pageToken + 1, pageLoading = False, pageError = "" }
+
+                ( restored, layoutCommand ) =
+                    if closed.operation == Impose && closed.source /= Nothing && not closed.layoutReady then
+                        schedule closed
+
+                    else
+                        ( closed, Cmd.none )
+            in
+            ( restored
+            , Cmd.batch
+                [ cmd
+                , layoutCommand
+                , bridge "clearPageThumbnails" []
+                , bridge "focus"
+                    [ ( "id"
+                      , E.string
+                            (if m.operation == Impose then
+                                "organize-toolbar"
+
+                             else
+                                "organize-files"
+                            )
+                      )
+                    ]
+                ]
+            )
+
+        ApplyPageOrder ->
+            applyPageOrder m
+
+        PageBatch batch ->
+            pageThumbnails { m | pageBatch = clamp 0 (max 0 ((O.count m - 1) // 12)) batch }
+
+        PagePosition value ->
+            ( { m | pagePosition = value }, Cmd.none )
+
+        PageSelected page ->
+            ( { m | pageSelected = page, pagePosition = m.pageDraft |> List.indexedMap Tuple.pair |> List.filter (\( _, p ) -> p == page) |> List.head |> Maybe.map (Tuple.first >> (+) 1 >> String.fromInt) |> Maybe.withDefault "1" }, Cmd.none )
+
+        MovePage ->
+            case String.toInt m.pagePosition of
+                Just position ->
+                    if position < 1 || position > O.count m || m.busy then
+                        ( m, Cmd.none )
+
+                    else
+                        let
+                            without =
+                                List.filter ((/=) m.pageSelected) m.pageDraft
+                        in
+                        let
+                            ( next, cmd ) =
+                                pageThumbnails { m | pageDraft = List.take (position - 1) without ++ [ m.pageSelected ] ++ List.drop (position - 1) without, pageBatch = (position - 1) // 12 }
+                        in
+                        ( next, Cmd.batch [ cmd, bridge "focus" [ ( "id", E.string ("organized-pages-item-" ++ String.fromInt m.pageSelected) ) ] ] )
+
+                Nothing ->
+                    ( m, Cmd.none )
+
+        PageCommand action ->
+            if m.busy then
+                ( m, Cmd.none )
+
+            else
+                pageThumbnails
+                    { m
+                        | pageDraft =
+                            if action == "reverse" then
+                                List.reverse m.pageDraft
+
+                            else
+                                O.identity m
+                        , pageBatch = 0
+                        , pageOrderState = Reorderable.initial
+                    }
+
+        PageOrderChanged change ->
+            let
+                result =
+                    Reorderable.apply change m.pageOrderState
+            in
+            case result.order of
+                Nothing ->
+                    ( { m | pageOrderState = result.state }, Cmd.none )
+
+                Just ids ->
+                    let
+                        moved =
+                            List.filterMap String.toInt ids
+                    in
+                    if m.busy || List.sort moved /= List.sort (O.visible m) then
+                        ( m, Cmd.none )
+
+                    else
+                        let
+                            ( next, cmd ) =
+                                pageThumbnails { m | pageDraft = List.take (m.pageBatch * 12) m.pageDraft ++ moved ++ List.drop ((m.pageBatch + 1) * 12) m.pageDraft, pageOrderState = result.state }
+                        in
+                        ( next, Cmd.batch [ cmd, Reorderable.focus "organized-pages" change (\_ -> NoOp) ] )
+
+        WorkspacePrepared epoch result ->
+            case result of
+                Ok ( id, count ) ->
+                    if epoch /= m.epoch || not m.pageOrganizer then
+                        ( m, delete ("gang-up/sources/" ++ id) )
+
+                    else if count /= O.count m then
+                        ( { m | busy = False, pageError = "The page count changed. Replace the files and try again." }, delete ("gang-up/sources/" ++ id) )
+
+                    else
+                        let
+                            ( next, cmd ) =
+                                pageThumbnails { m | pageSource = Just id, pageSourceOwned = True, pageSourceOrder = O.identity m, busy = False, phase = "", job = Nothing, error = "" }
+                        in
+                        ( next, Cmd.batch [ cmd, Maybe.map (\job -> delete ("jobs/" ++ job)) m.job |> Maybe.withDefault Cmd.none ] )
+
+                Err err ->
+                    if epoch /= m.epoch then
+                        ( m, Cmd.none )
+
+                    else
+                        ( { m | busy = False, pageLoading = False, pageError = httpError err }, Cmd.none )
+
+        OrderedSource epoch result ->
+            case result of
+                Ok source ->
+                    if epoch /= m.epoch then
+                        ( m, delete ("gang-up/sources/" ++ source.sourceId) )
+
+                    else
+                        let
+                            r =
+                                O.remapRequest (O.order m) m.pageDraft m.request |> I.bindSource source
+
+                            ( next, cmd ) =
+                                schedule { m | source = Just source, request = r, pageOrder = m.pageDraft, autoFinishedSize = False, pageOrganizer = False, pageSource = Nothing, pageThumbnails = Dict.empty, busy = False, job = Nothing, phase = "", selectedPage = 1, selectedImpression = Nothing, sheet = 0, back = False, quantityDrafts = Dict.empty, repeatSingle = [], repeatDouble = [], notice = "Page order updated for all tools.", retryKind = "" }
+                        in
+                        ( next, Cmd.batch [ cmd, bridge "clearPageThumbnails" [], bridge "focus" [ ( "id", E.string "organize-toolbar" ) ], bridge "source" [ ( "id", E.string source.sourceId ) ], Maybe.map (.sourceId >> (\id -> delete ("gang-up/sources/" ++ id))) m.source |> Maybe.withDefault Cmd.none ] )
+
+                Err err ->
+                    if epoch /= m.epoch then
+                        ( m, Cmd.none )
+
+                    else
+                        ( { m | busy = False, pageError = httpError err, phase = "" }, Cmd.none )
+
+        WorkspaceDiscarded id result ->
+            ( m, Cmd.batch [ delete ("jobs/" ++ id), Result.toMaybe result |> Maybe.map (\source -> delete ("gang-up/sources/" ++ source)) |> Maybe.withDefault Cmd.none ] )
 
         SetWorkspaceMenu open ->
             ( { m | workspaceMenu = open }, Cmd.none )
@@ -666,6 +967,9 @@ updateInternal msg m =
 
                 "replace" ->
                     update (Browse False) next
+
+                "pages" ->
+                    update OpenPages next
 
                 "clear" ->
                     if m.busy then
@@ -755,8 +1059,15 @@ updateInternal msg m =
                             in
                             ( next, Cmd.batch [ cmd, Reorderable.focus "file-queue" change (\_ -> NoOp) ] )
 
+        ChooseTool op ->
+            if List.isEmpty m.files && not m.busy then
+                ( { m | operation = op, preferredTool = Just op, error = "", toast = Nothing }, bridge "focus" [ ( "id", E.string "browse-files" ) ] )
+
+            else
+                ( m, Cmd.none )
+
         Switch op ->
-            if m.busy || op == m.operation then
+            if m.busy || m.pageOrganizer || op == m.operation then
                 ( m, Cmd.none )
 
             else
@@ -769,7 +1080,25 @@ updateInternal msg m =
                             prepare next
 
                         else
-                            ( { next | source = Nothing, display = Nothing, layout = Nothing, layoutReady = False }, Cmd.batch [ Http.cancel "layout", bridge "clearPreviews" [], Maybe.map (.sourceId >> (\id -> delete ("gang-up/sources/" ++ id))) m.source |> Maybe.withDefault Cmd.none ] )
+                            ( { next
+                                | source = Nothing
+                                , display = Nothing
+                                , layout = Nothing
+                                , layoutReady = False
+                                , pageSource =
+                                    if m.pageSourceOwned then
+                                        m.pageSource
+
+                                    else
+                                        Nothing
+                              }
+                            , Cmd.batch
+                                [ Http.cancel "layout"
+                                , bridge "clearPreviews" []
+                                , bridge "clearPageThumbnails" []
+                                , Maybe.map (.sourceId >> (\id -> delete ("gang-up/sources/" ++ id))) m.source |> Maybe.withDefault Cmd.none
+                                ]
+                            )
                 in
                 ( updated, Cmd.batch [ bridge "workspaceTransition" [], cmd ] )
 
@@ -802,18 +1131,34 @@ updateInternal msg m =
 
         SelectImpression index page ->
             if m.operation == Impose && page >= 1 && page <= Maybe.withDefault 0 m.request.sourcePageCount then
-                ( { m
-                    | selectedPage = page
-                    , selectedImpression = Just index
-                    , drafts =
-                        if page == m.selectedPage then
-                            m.drafts
+                let
+                    next =
+                        { m
+                            | selectedPage = page
+                            , selectedImpression = Just index
+                            , drafts =
+                                if page == m.selectedPage then
+                                    m.drafts
 
-                        else
-                            artworkDrafts m.drafts
-                  }
-                , Cmd.none
-                )
+                                else
+                                    artworkDrafts m.drafts
+                        }
+
+                    missingPair =
+                        case ( m.layout, m.display ) of
+                            ( Just l, Just display ) ->
+                                l.duplex
+                                    /= Nothing
+                                    && ([ False, True ] |> List.filterMap (\back -> I.pageNumber l m.sheet back index) |> List.any (\n -> not (Dict.member n display.urls)))
+
+                            _ ->
+                                False
+                in
+                if missingPair then
+                    preview next
+
+                else
+                    ( next, Cmd.none )
 
             else
                 ( m, Cmd.none )
@@ -887,7 +1232,11 @@ updateInternal msg m =
                 ( m, Cmd.none )
 
         SetRail rail ->
-            ( { m | rail = rail }, Cmd.none )
+            if List.member rail [ "setup", "preview" ] then
+                ( { m | rail = rail, dropdowns = Dict.empty }, bridge "focus" [ ( "id", E.string ("gang-" ++ rail ++ "-tab") ) ] )
+
+            else
+                ( m, Cmd.none )
 
         Toggle key ->
             toggle key m
@@ -928,10 +1277,23 @@ updateInternal msg m =
                 ( fresh, _ ) =
                     init m.theme
             in
-            ( { fresh | epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1, presets = m.presets, recent = m.recent, nextToastId = m.nextToastId }, Cmd.batch [ Http.cancel "inspection", Http.cancel "layout", bridge "clearPreviews" [], Maybe.map (.sourceId >> (\id -> delete ("gang-up/sources/" ++ id))) m.source |> Maybe.withDefault Cmd.none ] )
+            ( { fresh | epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1, presets = m.presets, recent = m.recent, nextToastId = m.nextToastId }
+            , Cmd.batch
+                [ Http.cancel "inspection"
+                , Http.cancel "layout"
+                , bridge "clearPreviews" []
+                , bridge "clearPageThumbnails" []
+                , if m.pageSourceOwned then
+                    Maybe.map (\id -> delete ("gang-up/sources/" ++ id)) m.pageSource |> Maybe.withDefault Cmd.none
+
+                  else
+                    Cmd.none
+                , Maybe.map (.sourceId >> (\id -> delete ("gang-up/sources/" ++ id))) m.source |> Maybe.withDefault Cmd.none
+                ]
+            )
 
         Cancel ->
-            ( { m | epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1, previewLoading = False, busy = False, job = Nothing, phase = "", notice = "Cancelled. Your files and settings are retained." }, Cmd.batch [ Http.cancel "inspection", Http.cancel "layout", bridge "cancelPreview" [], Maybe.map (discardJob m.jobKind) m.job |> Maybe.withDefault Cmd.none ] )
+            ( { m | epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1, previewLoading = False, pageToken = m.pageToken + 1, pageLoading = False, busy = False, job = Nothing, phase = "", notice = "Cancelled. Your files and settings are retained." }, Cmd.batch [ Http.cancel "inspection", Http.cancel "job-upload", Http.cancel "layout", bridge "cancelPreview" [], Maybe.map (discardJob m.jobKind) m.job |> Maybe.withDefault Cmd.none ] )
 
         Retry ->
             if m.retryKind == "rename" then
@@ -953,6 +1315,12 @@ updateInternal msg m =
 
                 else
                     commitFiles next
+
+            else if m.retryKind == "pages" then
+                openPages { m | pageSource = Nothing }
+
+            else if m.retryKind == "page-order" then
+                update ApplyPageOrder m
 
             else if m.retryKind == "prepare" then
                 prepare m
@@ -1016,6 +1384,9 @@ updateInternal msg m =
                         if status.state == "done" then
                             if m.jobKind == "prepare" then
                                 ( m, Http.get { url = "jobs/" ++ id ++ "/download", expect = jsonExpect (Prepared epoch) A.preparedSourceResponseDecoder } )
+
+                            else if m.jobKind == "pages" then
+                                ( m, Http.get { url = "jobs/" ++ id ++ "/download", expect = jsonExpect (WorkspacePrepared epoch) workspaceDecoder } )
 
                             else
                                 ( { m | progress = 100, phase = "Downloading", error = "" }
@@ -1085,6 +1456,12 @@ updateInternal msg m =
 
                                         else
                                             m.pending
+                                    , pageOrder =
+                                        if List.isEmpty m.pending then
+                                            m.pageOrder
+
+                                        else
+                                            []
                                     , pending = []
                                     , source = Just source
                                     , request = { r | finishedCutSize = size }
@@ -1093,6 +1470,7 @@ updateInternal msg m =
                                     , busy = False
                                     , error = ""
                                     , job = Nothing
+                                    , sizeInput = Nothing
                                     , selectedPage = 1
                                     , selectedImpression = Nothing
                                     , sheet = 0
@@ -1119,7 +1497,11 @@ updateInternal msg m =
                 ( m, Cmd.none )
 
             else
-                ( m, request "POST" "gang-up/layout" (Http.jsonBody (A.layoutRequestEncoder m.request)) (jsonExpect (LaidOut revision) A.layoutResultDecoder) (Just "layout") )
+                let
+                    sized =
+                        smartSize m
+                in
+                ( sized, request "POST" "gang-up/layout" (Http.jsonBody (A.layoutRequestEncoder sized.request)) (jsonExpect (LaidOut revision) A.layoutResultDecoder) (Just "layout") )
 
         LaidOut revision result ->
             if revision /= m.revision || m.operation /= Impose then
@@ -1139,8 +1521,17 @@ updateInternal msg m =
         Navigate sheet back ->
             preview { m | sheet = max 0 sheet, back = back, selectedImpression = Nothing }
 
+        SetPreviewZoom zoom ->
+            ( { m | previewZoom = clamp 100 300 zoom }, Cmd.none )
+
+        FitPreview ->
+            ( { m | previewZoom = 100 }, Cmd.none )
+
+        TogglePreviewGuides ->
+            ( { m | previewGuides = not m.previewGuides }, Cmd.none )
+
         Lease _ ->
-            ( m, Maybe.map (.sourceId >> (\id -> request "PUT" ("gang-up/sources/" ++ id ++ "/lease") Http.emptyBody (expect (\_ -> NoOp) Ok) Nothing)) m.source |> Maybe.withDefault Cmd.none )
+            ( m, Cmd.batch ([ Maybe.map .sourceId m.source, m.pageSource ] |> List.filterMap identity |> List.map (\id -> request "PUT" ("gang-up/sources/" ++ id ++ "/lease") Http.emptyBody (expect (\_ -> NoOp) Ok) Nothing)) )
 
         Catalog name result ->
             case result of
@@ -1361,6 +1752,7 @@ field key value m =
                             }
                         , drafts = Dict.remove "finished-width" (Dict.remove "finished-height" m.drafts)
                         , autoFinishedSize = False
+                        , sizeNotice = ""
                     }
 
             else
@@ -1820,6 +2212,12 @@ submit m =
 
             parts =
                 List.map (\( k, v ) -> Http.stringPart k v) fields
+                    ++ (if m.operation /= Impose then
+                            pageOrderParts m
+
+                        else
+                            []
+                       )
                     ++ (if m.operation == Impose then
                             []
 
@@ -1850,6 +2248,30 @@ browserEvent event m =
             get "token" D.int -1
     in
     case action of
+        "finishedSizeCommitted" ->
+            ( { m | sizeInput = Nothing }, Cmd.none )
+
+        "pageThumbnails" ->
+            if token /= m.pageToken || not m.pageOrganizer then
+                ( m, Cmd.none )
+
+            else
+                let
+                    urls =
+                        get "urls" (D.list (D.map2 Tuple.pair (D.field "page" D.int) (D.field "url" D.string))) []
+
+                    items =
+                        urls |> List.filterMap (\( page, url ) -> m.pageSourceOrder |> List.drop (page - 1) |> List.head |> Maybe.map (\original -> ( original, url )))
+                in
+                ( { m | pageThumbnails = Dict.fromList items, pageLoading = False, pageError = "" }, Cmd.none )
+
+        "pageThumbnailsError" ->
+            if token /= m.pageToken || not m.pageOrganizer then
+                ( m, Cmd.none )
+
+            else
+                ( { m | pageLoading = False, pageError = get "message" D.string "Could not load thumbnails. You can still organize pages by their labels." }, Cmd.none )
+
         "preview" ->
             if token /= m.previewToken || m.operation /= Impose then
                 ( m, Cmd.none )
@@ -1986,5 +2408,155 @@ discardJob kind id =
     if kind == "prepare" then
         Http.get { url = "jobs/" ++ id ++ "/download", expect = jsonExpect (Discarded id) A.preparedSourceResponseDecoder }
 
+    else if kind == "pages" then
+        Http.get { url = "jobs/" ++ id ++ "/download", expect = jsonExpect (WorkspaceDiscarded id) (D.field "sourceId" D.string) }
+
     else
         delete ("jobs/" ++ id)
+
+
+pageOrderParts : Model -> List Http.Part
+pageOrderParts m =
+    if List.isEmpty m.pageOrder || m.pageOrder == O.identity m then
+        []
+
+    else
+        [ Http.stringPart "pageOrder" (E.encode 0 (E.list E.int m.pageOrder)) ]
+
+
+workspaceDecoder : D.Decoder ( String, Int )
+workspaceDecoder =
+    D.map2 Tuple.pair (D.field "sourceId" D.string) (D.oneOf [ D.field "pageCount" D.int, D.at [ "analysis", "pageCount" ] D.int ])
+
+
+openPages : Model -> ( Model, Cmd Msg )
+openPages original =
+    let
+        ( next, cmd ) =
+            openPagesInternal original
+    in
+    ( next, Cmd.batch [ cmd, bridge "focus" [ ( "id", E.string "page-organizer-title" ) ] ] )
+
+
+openPagesInternal : Model -> ( Model, Cmd Msg )
+openPagesInternal m =
+    if m.busy || List.isEmpty m.files then
+        ( m, Cmd.none )
+
+    else
+        let
+            base =
+                { m | pageOrganizer = True, pageDraft = O.order m, pageSelected = O.order m |> List.head |> Maybe.withDefault 1, pagePosition = "1", pageBatch = 0, pageError = "", pageThumbnails = Dict.empty, pending = [], error = "", retryKind = "", dropdowns = Dict.empty, presetsOpen = False, workspaceMenu = False, pageOrderState = Reorderable.initial }
+        in
+        case m.source of
+            Just source ->
+                let
+                    ( next, cmd ) =
+                        pageThumbnails { base | pageSource = Just source.sourceId, pageSourceOwned = False, pageSourceOrder = O.order m }
+                in
+                ( next
+                , Cmd.batch
+                    [ cmd
+                    , if m.pageSourceOwned then
+                        Maybe.map (\id -> delete ("gang-up/sources/" ++ id)) m.pageSource |> Maybe.withDefault Cmd.none
+
+                      else
+                        Cmd.none
+                    ]
+                )
+
+            Nothing ->
+                case m.pageSource of
+                    Just _ ->
+                        pageThumbnails base
+
+                    Nothing ->
+                        let
+                            next =
+                                { base | epoch = m.epoch + 1, busy = True, phase = "Preparing pages", jobKind = "pages", retryKind = "pages", progress = 0, job = Nothing }
+                        in
+                        ( next, request "POST" "pdf/workspaces" (Http.multipartBody (List.map (\f -> Http.filePart "file" f.file) m.files)) (expect (Created next.epoch "pages") Ok) (Just "job-upload") )
+
+
+pageThumbnails : Model -> ( Model, Cmd Msg )
+pageThumbnails m =
+    case m.pageSource of
+        Nothing ->
+            ( m, Cmd.none )
+
+        Just id ->
+            let
+                token =
+                    m.pageToken + 1
+
+                pageNumber original =
+                    m.pageSourceOrder |> List.indexedMap Tuple.pair |> List.filter (\( _, n ) -> original == n) |> List.head |> Maybe.map (Tuple.first >> (+) 1)
+
+                pages =
+                    O.visible m |> List.filterMap pageNumber
+            in
+            ( { m | pageToken = token, pageLoading = True, pageError = "" }
+            , bridge "pageThumbnails" [ ( "source", E.string id ), ( "pages", E.list E.int pages ), ( "token", E.int token ), ( "owned", E.bool m.pageSourceOwned ) ]
+            )
+
+
+applyPageOrder : Model -> ( Model, Cmd Msg )
+applyPageOrder m =
+    if m.busy || List.sort m.pageDraft /= O.identity m then
+        ( m, Cmd.none )
+
+    else if m.pageDraft == O.order m then
+        update ClosePages m
+
+    else if m.operation /= Impose then
+        ( { m | pageOrder = m.pageDraft, request = O.remapRequest (O.order m) m.pageDraft m.request, repeatSingle = [], repeatDouble = [], pageThumbnails = Dict.empty, pageOrganizer = False, pageLoading = False, pageToken = m.pageToken + 1, notice = "Page order updated for all tools." }, Cmd.batch [ bridge "clearPageThumbnails" [], bridge "focus" [ ( "id", E.string "organize-files" ) ] ] )
+
+    else
+        case m.source of
+            Nothing ->
+                ( m, Cmd.none )
+
+            Just source ->
+                let
+                    relative original =
+                        O.order m |> List.indexedMap Tuple.pair |> List.filter (\( _, n ) -> n == original) |> List.head |> Maybe.map (Tuple.first >> (+) 1)
+
+                    next =
+                        { m | epoch = m.epoch + 1, busy = True, phase = "Applying page order", retryKind = "page-order", progress = 0 }
+                in
+                ( next, request "POST" ("gang-up/sources/" ++ source.sourceId ++ "/order") (Http.jsonBody (E.object [ ( "pageOrder", E.list E.int (List.filterMap relative m.pageDraft) ) ])) (jsonExpect (OrderedSource next.epoch) A.preparedSourceResponseDecoder) Nothing )
+
+
+smartSize : Model -> Model
+smartSize m =
+    let
+        candidate =
+            if m.autoFinishedSize then
+                Maybe.map (\source -> { baseRequest | finishedCutSize = I.detectedFinishedSize source.analysis }) m.source |> Maybe.withDefault baseRequest
+
+            else
+                baseRequest
+
+        baseRequest =
+            m.request
+
+        fitted =
+            I.fitToSheet candidate
+
+        dimensions size =
+            String.fromFloat size.width ++ " × " ++ String.fromFloat size.height ++ " in"
+    in
+    if fitted.finishedCutSize == m.request.finishedCutSize then
+        m
+
+    else
+        { m
+            | request = fitted
+            , drafts = m.drafts |> Dict.remove "finished-width" |> Dict.remove "finished-height"
+            , sizeNotice =
+                if candidate.finishedCutSize == fitted.finishedCutSize then
+                    "Original artwork size restored for this sheet."
+
+                else
+                    dimensions candidate.finishedCutSize ++ " artwork fitted proportionally to " ++ dimensions fitted.finishedCutSize ++ " for this sheet."
+        }

@@ -16,6 +16,10 @@ export function connect(app) {
     if (item.dataset.artworkDisabled === 'true') return;
     send({action:'artworkMenu', page:Number(item.dataset.artworkPage), index:Number(item.dataset.impressionIndex), x, y, trigger:item.id});
   };
+  document.addEventListener('focusout',event => {
+    const sizes = ['finished-width','finished-height'];
+    if (sizes.includes(event.target.id) && !sizes.includes(event.relatedTarget?.id)) send({action:'finishedSizeCommitted'});
+  });
   document.addEventListener('contextmenu', event => {
     const item = event.target.closest('.sheet-item');
     if (!item) return;
@@ -166,13 +170,13 @@ export function connect(app) {
     const timer = setTimeout(resolve, ms);
     signal.addEventListener('abort', () => { clearTimeout(timer); reject(new DOMException('Cancelled', 'AbortError')); }, {once:true});
   });
-  async function batch(source, pages, bleed, signal) {
+  async function batch(source, pages, bleed, signal, namespace = 'gang-up/sources') {
     let failure;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const response = await fetch(`gang-up/sources/${encodeURIComponent(source)}/previews`, {
+        const response = await fetch(`${namespace}/${encodeURIComponent(source)}/previews`, {
           method:'POST', headers:{'Content-Type':'application/json'}, signal,
-          body:JSON.stringify({pageNumbers:pages, sourceBleedOverride:bleed})
+          body:JSON.stringify(namespace === 'pdf/workspaces' ? {pageNumbers:pages} : {pageNumbers:pages, sourceBleedOverride:bleed})
         });
         if (!response.ok) {
           const message = await response.text();
@@ -203,6 +207,36 @@ export function connect(app) {
       }
     }
     throw failure;
+  }
+  let pageController, pageWorkspaceSource;
+  const pageCache = new Map();
+  const clearPageThumbnails = () => {
+    pageController?.abort();
+    for (const asset of pageCache.values()) URL.revokeObjectURL(asset.url);
+    pageCache.clear();
+  };
+  async function pageThumbnails(command) {
+    pageController?.abort();
+    const controller = new AbortController();
+    pageController = controller;
+    const {source, pages, token, owned} = command;
+    if (owned) pageWorkspaceSource = source;
+    const keyFor = page => `${source}:${page}`;
+    try {
+      const missing = pages.filter(page => !pageCache.has(keyFor(page)));
+      for (let i=0;i<missing.length;i+=4) {
+        const assets = await batch(source,missing.slice(i,i+4),undefined,controller.signal,'pdf/workspaces');
+        if (controller.signal.aborted) return;
+        for (const {page,png} of assets) pageCache.set(keyFor(page),{url:URL.createObjectURL(new Blob([png],{type:'image/png'}))});
+      }
+      if (controller.signal.aborted) return;
+      const urls = pages.map(page=>({page,url:pageCache.get(keyFor(page)).url}));
+      for (const page of pages) {const key=keyFor(page),asset=pageCache.get(key);pageCache.delete(key);pageCache.set(key,asset);}
+      send({action:'pageThumbnails',token,urls});
+      while (pageCache.size>24) {const key=pageCache.keys().next().value;URL.revokeObjectURL(pageCache.get(key).url);pageCache.delete(key);}
+    } catch(error) {
+      if (!controller.signal.aborted) send({action:'pageThumbnailsError',token,message:error.message || 'Could not load page thumbnails. You can still reorder by the page labels.'});
+    }
   }
   async function preview(command) {
     previewController?.abort();
@@ -265,6 +299,8 @@ export function connect(app) {
         break;
       case 'closeArtworkMenu': closeArtworkMenu(true); break;
       case 'identity': identity = command.token; downloadController?.abort(); break;
+      case 'pageThumbnails': void pageThumbnails(command); break;
+      case 'clearPageThumbnails': clearPageThumbnails(); break;
       case 'preview': void preview(command); break;
       case 'cancelPreview': previewController?.abort(); break;
       case 'commitPreview':
@@ -316,6 +352,8 @@ export function connect(app) {
   document.addEventListener('pointerup',() => { drag = undefined; });
   document.addEventListener('pointercancel',() => { drag = undefined; });
   window.addEventListener('pagehide',() => {
+    clearPageThumbnails();
+    if (pageWorkspaceSource) void fetch(`gang-up/sources/${encodeURIComponent(pageWorkspaceSource)}`,{method:'DELETE',keepalive:true});
     downloadController?.abort();
     clear();
     if (activeSource) void fetch(`gang-up/sources/${encodeURIComponent(activeSource)}`,{method:'DELETE',keepalive:true});

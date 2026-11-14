@@ -4,6 +4,7 @@ mod convert;
 mod gang_up;
 mod gang_up_catalog;
 mod jobs;
+mod pages;
 mod pdf_ops;
 mod router;
 mod state;

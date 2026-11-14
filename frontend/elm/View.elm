@@ -21,6 +21,8 @@ import Html.Keyed as Keyed
 import Imposition as I
 import Json.Decode as D
 import Model exposing (..)
+import Organizer
+import OutputSummary
 import Preview
 import Svg
 import Svg.Attributes as SA
@@ -93,7 +95,7 @@ toolDropdown m =
         config =
             DaField.config "tool" "Tool"
     in
-    dropdownControl m { config | disabled = m.busy } (operationLabel m.operation) (List.map (\op -> ( operationLabel op, operationLabel op )) (operations m.files))
+    dropdownControl m { config | disabled = m.busy || m.pageOrganizer } (operationLabel m.operation) (List.map (\op -> ( operationLabel op, operationLabel op )) (operations m.files))
 
 
 orientationDropdown : Model -> ( DaField.Config, Dropdown.Control Msg )
@@ -105,32 +107,12 @@ orientationDropdown m =
         r =
             m.request
 
-        rotation =
-            case r.orientationPreference of
-                A.OrientationPreferenceUpright ->
-                    0
-
-                A.OrientationPreferenceQuarterTurn ->
-                    90
-
-                _ ->
-                    Maybe.map .rotationDegrees m.layout
-                        |> Maybe.withDefault (Maybe.map .rotationDegrees r.manual |> Maybe.withDefault 0)
-
         selected =
-            case r.orientationPreference of
-                A.OrientationPreferencePortrait ->
-                    "portrait"
+            if r.finishedCutSize.width > r.finishedCutSize.height then
+                "landscape"
 
-                A.OrientationPreferenceLandscape ->
-                    "landscape"
-
-                _ ->
-                    if (r.finishedCutSize.width > r.finishedCutSize.height) /= (rotation == 90) then
-                        "landscape"
-
-                    else
-                        "portrait"
+            else
+                "portrait"
     in
     dropdownControl m
         { config | disabled = m.busy || not (m.chosenWidth && m.chosenHeight) || Dict.member "invalid:finished-width" m.drafts || Dict.member "invalid:finished-height" m.drafts }
@@ -295,7 +277,7 @@ view m =
 
 appView : Model -> Html Msg
 appView m =
-    main_ [ classList [ ( "shell", True ), ( "elm-shell", True ), ( "empty-shell", List.isEmpty m.files ), ( "generic-shell", m.operation /= Impose ) ], preventDefaultOn "dragover" (D.succeed ( NoOp, True )), on "elm-files" (D.map Dropped (D.field "detail" (D.list File.decoder))) ]
+    main_ [ classList [ ( "shell", True ), ( "elm-shell", True ), ( "empty-shell", List.isEmpty m.files ), ( "generic-shell", m.operation /= Impose && not m.pageOrganizer ) ], preventDefaultOn "dragover" (D.succeed ( NoOp, True )), on "elm-files" (D.map Dropped (D.field "detail" (D.list File.decoder))) ]
         [ if List.isEmpty m.files then
             text ""
 
@@ -305,9 +287,12 @@ appView m =
             emptyView m
 
           else
-            section [ classList [ ( "ready-shell", True ), ( "generic-ready", m.operation /= Impose ) ] ]
+            section [ classList [ ( "ready-shell", True ), ( "generic-ready", m.operation /= Impose && not m.pageOrganizer ), ( "page-organizing", m.pageOrganizer ) ] ]
                 [ section [ classList [ ( "ready-card", True ), ( "imposing", m.operation == Impose ) ] ]
-                    [ if m.operation == Impose then
+                    [ if m.pageOrganizer then
+                        Organizer.view m
+
+                      else if m.operation == Impose then
                         imposeView m
 
                       else
@@ -353,9 +338,10 @@ workspaceActions m =
         , themeToggle m
         , Menu.view []
             config
-            [ { id = "add", label = "Add " ++ fileLabel, disabled = m.busy, onSelect = WorkspaceAction "add" }
-            , { id = "replace", label = "Replace " ++ fileLabel, disabled = m.busy, onSelect = WorkspaceAction "replace" }
-            , { id = "clear", label = "Clear workspace", disabled = m.busy, onSelect = WorkspaceAction "clear" }
+            [ { id = "add", label = "Add " ++ fileLabel, disabled = m.busy || m.pageOrganizer, onSelect = WorkspaceAction "add" }
+            , { id = "replace", label = "Replace " ++ fileLabel, disabled = m.busy || m.pageOrganizer, onSelect = WorkspaceAction "replace" }
+            , { id = "pages", label = "Organize pages", disabled = m.busy || m.pageOrganizer, onSelect = WorkspaceAction "pages" }
+            , { id = "clear", label = "Clear workspace", disabled = m.busy || m.pageOrganizer, onSelect = WorkspaceAction "clear" }
             ]
         ]
 
@@ -394,6 +380,29 @@ statusView m =
                     [ div [ class "toast-progress-label", attribute "role" "status", attribute "aria-atomic" "true" ]
                         [ span [] [ text m.phase ], span [] [ text (String.fromInt m.progress ++ "%") ] ]
                     , Feedback.progress [] { label = m.phase, value = Just m.progress }
+                    , if
+                        (if List.isEmpty m.pending then
+                            m.files
+
+                         else
+                            m.pending
+                        )
+                            |> List.map (.file >> File.size)
+                            |> List.sum
+                            |> (\bytes -> bytes >= 50 * 1024 * 1024)
+                      then
+                        p [ class "large-file-status", attribute "role" "status", attribute "aria-live" "polite", attribute "aria-atomic" "true" ]
+                            [ text
+                                (if m.job == Nothing then
+                                    "Loading large file… This may take a few minutes. Keep this tab open."
+
+                                 else
+                                    "Processing large file… This may take a few minutes. Keep this tab open."
+                                )
+                            ]
+
+                      else
+                        text ""
                     , Button.content []
                         { variant = Button.Secondary, disabled = False, busy = False, className = "toast-action" }
                         [ text
@@ -459,14 +468,78 @@ statusView m =
 
 emptyView : Model -> Html Msg
 emptyView m =
+    let
+        description op =
+            case op of
+                PdfImage ->
+                    "Save PDF pages as PNG or JPEG images."
+
+                Split ->
+                    "Save selected pages as one PDF or separate files."
+
+                Merge ->
+                    "Combine two or more PDFs in your chosen order."
+
+                ImagePdf ->
+                    "Turn PNG or JPEG images into a PDF."
+
+                Impose ->
+                    "Arrange artwork on print sheets with bleed and duplex options."
+
+        formats =
+            case m.preferredTool of
+                Just ImagePdf ->
+                    "Choose PNG or JPEG images. One image becomes one PDF page."
+
+                Just Merge ->
+                    "Choose at least two PDF files. You can change their order next."
+
+                Just PdfImage ->
+                    "Choose one or more PDF files."
+
+                Just Split ->
+                    "Choose one PDF, then select the pages to keep."
+
+                _ ->
+                    "PDF, PNG, and JPEG supported"
+    in
     div [ class "home-view" ]
         [ div [ class "home-content" ]
             [ header [ class "home-header" ] [ h1 [] [ text "PDF Tools" ], themeToggle m ]
+            , section [ class "home-tools", attribute "aria-labelledby" "home-tools-title" ]
+                [ h2 [ id "home-tools-title" ] [ text "What would you like to do?" ]
+                , p [] [ text "Choose a tool, or browse files to get started." ]
+                , div [ class "home-tool-list", attribute "role" "group", attribute "aria-label" "Choose a PDF tool" ]
+                    (List.map
+                        (\op ->
+                            Button.content
+                                [ attribute "aria-pressed"
+                                    (if m.preferredTool == Just op then
+                                        "true"
+
+                                     else
+                                        "false"
+                                    )
+                                ]
+                                { variant = Button.Secondary, disabled = m.busy, busy = False, className = "home-tool-choice" }
+                                [ span [ class "home-tool-name" ] [ span [] [ text (operationLabel op) ], setupArrow True ]
+                                , span [ class "home-tool-description" ] [ text (description op) ]
+                                ]
+                                (ChooseTool op)
+                        )
+                        [ PdfImage, Split, Merge, ImagePdf, Impose ]
+                    )
+                ]
             , Card.view [ id "upload-card", attribute "aria-label" "Upload files" ]
                 [ div [ class "empty-state-content" ]
-                    [ div [ class "empty-intro" ] [ h2 [] [ text "Drop your files here" ] ]
+                    [ div [ class "empty-intro" ] [ h2 [] [ text (Maybe.map operationLabel m.preferredTool |> Maybe.withDefault "Drop your files here") ] ]
                     , Button.content [ id "browse-files", attribute "aria-describedby" "empty-state-description" ] { variant = Button.Primary, disabled = m.busy, busy = False, className = "primary-button" } [ text "Browse files" ] (Browse False)
-                    , p [ id "empty-state-description", class "empty-formats" ] [ text "PDF, PNG, and JPEG supported" ]
+                    , p [ id "empty-state-description", class "empty-formats" ] [ text formats ]
+                    , if m.preferredTool /= Nothing then
+                        p [ class "upload-drop-hint" ] [ text "Or drop your files anywhere on this page." ]
+
+                      else
+                        text ""
                     ]
                 ]
             ]
@@ -478,6 +551,14 @@ queueView m =
     section [ classList [ ( "file-queue", True ), ( "single-file", List.length m.files == 1 ) ], attribute "aria-label" "Selected files" ]
         [ div [ class "file-queue-head" ]
             [ div [ class "queue-heading" ] [ h2 [] [ text "Files" ], span [ class "count-badge" ] [ text (String.fromInt (List.length m.files)) ] ]
+            , div [ class "file-queue-actions" ]
+                [ Button.view [ id "add-files" ] { variant = Button.Secondary, disabled = m.busy, busy = False, className = "" } "Add files" (Browse True)
+                , if m.operation /= Impose then
+                    Button.view [ id "organize-files" ] { variant = Button.Quiet, disabled = m.busy, busy = False, className = "" } "Organize pages" OpenPages
+
+                  else
+                    text ""
+                ]
             ]
         , FileList.view []
             { id = "file-queue", label = "Selected files", moveUp = "Move up", moveDown = "Move down", remove = "Remove" }
@@ -522,7 +603,12 @@ pageChoices m =
                 m.imagePages
     in
     div [ class "page-selection" ]
-        [ div [ class "field" ]
+        [ if m.pageOrder /= [] && m.pageOrder /= Organizer.identity m then
+            p [ class "page-order-note" ] [ text "Using your custom page order. Page ranges refer to the new positions." ]
+
+          else
+            text ""
+        , div [ class "field" ]
             [ span [] [ text "Pages" ]
             , div [ class "page-selection-actions" ]
                 [ Button.content
@@ -600,7 +686,7 @@ genericView m =
 
                 Split ->
                     [ pageChoices m
-                    , choices "Output" "output" m.outputMode [ ( "individual", "Individual" ), ( "combined", "Combined" ), ( "chunks", "Chunks" ) ]
+                    , choices "Output" "output" m.outputMode [ ( "individual", "One PDF per page" ), ( "combined", "One PDF" ), ( "chunks", "Page groups" ) ]
                     , if m.outputMode == "chunks" then
                         let
                             config =
@@ -650,6 +736,7 @@ genericView m =
         [ queueView m
         , Html.form [ class "tool-form", attribute "aria-label" (Model.operationLabel m.operation ++ " settings"), onSubmit Submit ]
             [ fieldset [ class "tool-form-fields", disabled m.busy ] fields
+            , p [ class "output-summary", attribute "role" "status", attribute "aria-atomic" "true" ] [ text (OutputSummary.generic m) ]
             , div [ class "submit-row" ] [ Button.submitContent [] { variant = Button.Primary, disabled = m.busy || not validPages || not validChunk, busy = False, className = "primary-button" } [ text action ] ]
             ]
         ]
@@ -694,6 +781,15 @@ imposeView m =
                     [ Button.content
                         [ id "gang-setup-tab"
                         , attribute "role" "tab"
+                        , attribute "aria-controls" "gang-setup-panel"
+                        , tabindex
+                            (if m.rail == "preview" then
+                                -1
+
+                             else
+                                0
+                            )
+                        , preventDefaultOn "keydown" (railTabKey "setup")
                         , attribute "aria-selected"
                             (if m.rail /= "preview" then
                                 "true"
@@ -708,6 +804,15 @@ imposeView m =
                     , Button.content
                         [ id "gang-preview-tab"
                         , attribute "role" "tab"
+                        , attribute "aria-controls" "gang-preview-panel"
+                        , tabindex
+                            (if m.rail == "preview" then
+                                0
+
+                             else
+                                -1
+                            )
+                        , preventDefaultOn "keydown" (railTabKey "preview")
                         , attribute "aria-selected"
                             (if m.rail == "preview" then
                                 "true"
@@ -725,6 +830,47 @@ imposeView m =
                 , Preview.view m
                 ]
         ]
+
+
+railTabKey : String -> D.Decoder ( Msg, Bool )
+railTabKey current =
+    D.field "key" D.string
+        |> D.andThen
+            (\key ->
+                case key of
+                    "ArrowRight" ->
+                        D.succeed
+                            ( SetRail
+                                (if current == "setup" then
+                                    "preview"
+
+                                 else
+                                    "setup"
+                                )
+                            , True
+                            )
+
+                    "ArrowLeft" ->
+                        D.succeed
+                            ( SetRail
+                                (if current == "setup" then
+                                    "preview"
+
+                                 else
+                                    "setup"
+                                )
+                            , True
+                            )
+
+                    "Home" ->
+                        D.succeed ( SetRail "setup", True )
+
+                    "End" ->
+                        D.succeed ( SetRail "preview", True )
+
+                    _ ->
+                        D.fail "Not a workspace tab navigation key"
+            )
 
 
 setupTabKey : Int -> D.Decoder ( Msg, Bool )
@@ -757,7 +903,7 @@ setupView m =
             m.request
 
         title =
-            List.drop m.step [ "Size", "Sheet", "Bleed" ] |> List.head |> Maybe.withDefault "Size"
+            List.drop m.step [ "Size", "Sheet", "Review" ] |> List.head |> Maybe.withDefault "Size"
 
         manual =
             Maybe.withDefault { rows = 1, columns = 1, rotationDegrees = 0, margins = Nothing } r.manual
@@ -783,24 +929,42 @@ setupView m =
         controls =
             case m.step of
                 0 ->
-                    [ h3 [] [ text "Finished size" ]
+                    [ h3 [] [ text "Finished piece size" ]
+                    , p [ class "field-help setup-intro" ] [ text "The size of each piece after cutting. We start with the size detected in your artwork." ]
                     , div [ class "field-grid two" ] [ numberField m "Width (in)" "finished-width" r.finishedCutSize.width, numberField m "Height (in)" "finished-height" r.finishedCutSize.height ]
-                    , dropdownView (orientationDropdown m)
-                    , h3 [] [ text "Arrangement" ]
-                    , choices "Sheet arrangements"
-                        "layout"
-                        (if r.layoutMode == A.LayoutModeManual then
-                            "manual"
-
-                         else
-                            "maxPieces"
-                        )
-                        [ ( "maxPieces", "Max per sheet" ), ( "manual", "Custom grid" ) ]
-                    , if r.layoutMode == A.LayoutModeManual then
-                        div [ class "field-grid two" ] [ numberField m "Rows" "rows" (toFloat manual.rows), numberField m "Columns" "columns" (toFloat manual.columns) ]
+                    , if m.sizeNotice /= "" then
+                        p [ class "size-fit-notice", attribute "role" "status" ] [ text m.sizeNotice ]
 
                       else
                         text ""
+                    , details
+                        (class "setup-options size-layout-options"
+                            :: (if r.layoutMode == A.LayoutModeManual then
+                                    [ attribute "open" "" ]
+
+                                else
+                                    []
+                               )
+                        )
+                        [ summary [] [ text "Orientation and layout" ]
+                        , div [ class "setup-options-content" ]
+                            [ dropdownView (orientationDropdown m)
+                            , choices "Sheet arrangements"
+                                "layout"
+                                (if r.layoutMode == A.LayoutModeManual then
+                                    "manual"
+
+                                 else
+                                    "maxPieces"
+                                )
+                                [ ( "maxPieces", "Max per sheet" ), ( "manual", "Custom grid" ) ]
+                            , if r.layoutMode == A.LayoutModeManual then
+                                div [ class "field-grid two" ] [ numberField m "Rows" "rows" (toFloat manual.rows), numberField m "Columns" "columns" (toFloat manual.columns) ]
+
+                              else
+                                p [ class "field-help" ] [ text "We arrange as many pieces as will fit on each sheet. Choose Custom grid to set rows and columns yourself." ]
+                            ]
+                        ]
                     , if not m.chosenWidth || not m.chosenHeight then
                         p [ class "field-help" ] [ text "Choose both finished dimensions or apply a preset." ]
 
@@ -843,7 +1007,7 @@ setupView m =
                         else
                             div [ class "repeat-quantity-section", attribute "aria-label" "Copy quantities" ]
                                 [ span [ class "quantity-summary-label" ] [ text "Copy quantities" ]
-                                , strong [ class "quantity-summary-total" ] [ text (String.fromInt r.quantityRequested ++ " impressions") ]
+                                , strong [ class "quantity-summary-total" ] [ text (String.fromInt r.quantityRequested ++ " total copies") ]
                                 , p [ class "quantity-summary-detail" ]
                                     [ text
                                         (I.quantities r
@@ -879,13 +1043,34 @@ setupView m =
                       else
                         text ""
                     , dropdownView (printingDropdown m)
-                    , details []
+                    , if modBy 2 (Maybe.withDefault 1 r.sourcePageCount) /= 0 then
+                        p [ class "field-help" ] [ text "Double-sided printing needs an even number of artwork pages: one front and one back per pair." ]
+
+                      else
+                        text ""
+                    , if r.sides == A.SidesDouble then
+                        div [ class "duplex-setup" ]
+                            [ dropdownView (flipDropdown m)
+                            , p [ class "field-help" ] [ text "Match this to the printer’s duplex setting. Artwork turns automatically so the cut pieces have matching tops." ]
+                            ]
+
+                      else
+                        text ""
+                    , details
+                        (class "setup-options"
+                            :: (if Dict.keys m.drafts |> List.any (\key -> List.member key [ "invalid:gutter-horizontal", "invalid:gutter-vertical", "invalid:margin-top", "invalid:margin-right", "invalid:margin-bottom", "invalid:margin-left" ]) then
+                                    [ attribute "open" "" ]
+
+                                else
+                                    []
+                               )
+                        )
                         [ summary [] [ text "Advanced sheet settings" ]
                         , div [ class "field-grid two" ] [ numberField m "Horizontal gutter (in)" "gutter-horizontal" r.gutter.horizontal, numberField m "Vertical gutter (in)" "gutter-vertical" r.gutter.vertical ]
                         , if r.sides == A.SidesDouble then
                             div []
-                                [ dropdownView (flipDropdown m)
-                                , check "Rotate back side 180°" "rotate-back" duplex.rotateBack180
+                                [ check "Rotate back side 180°" "rotate-back" duplex.rotateBack180
+                                , p [ class "field-help" ] [ text "Rotates the entire back sheet, including positions. This changes the required printer flip edge; check the print instructions above the preview." ]
                                 ]
 
                           else
@@ -907,77 +1092,129 @@ setupView m =
                     ]
 
                 _ ->
-                    [ h3 [] [ text "Edge artwork" ]
+                    [ h3 [] [ text "Review your PDF" ]
+                    , p [ class "setup-intro field-help" ] [ text "Check the sheet preview, then download your PDF for printing." ]
+                    , p [ class "output-summary", attribute "role" "status", attribute "aria-atomic" "true" ] [ text (OutputSummary.imposed m) ]
+                    , if Dict.keys m.drafts |> List.any (\key -> List.member key [ "invalid:finished-width", "invalid:finished-height", "invalid:rows", "invalid:columns" ]) then
+                        btn "Check piece size and layout" (SetStep 0)
+
+                      else
+                        text ""
+                    , if (Dict.keys m.drafts |> List.any (\key -> String.startsWith "invalid:" key && not (List.member key [ "invalid:finished-width", "invalid:finished-height", "invalid:rows", "invalid:columns", "invalid:source-bleed", "invalid:created-bleed" ]))) || not (Dict.isEmpty (Dict.filter (\_ draft -> Result.toMaybe (V.whole 0 10000 draft) == Nothing) m.quantityDrafts)) then
+                        btn "Check sheet settings and copies" (SetStep 1)
+
+                      else
+                        text ""
+                    , dl [ class "review-settings" ]
+                        [ dt []
+                            [ text
+                                (if List.any (\override -> override.finishedCutSize /= Nothing) r.pageOverrides then
+                                    "Default piece size"
+
+                                 else
+                                    "Finished piece"
+                                )
+                            ]
+                        , dd [] [ text (String.fromFloat r.finishedCutSize.width ++ " × " ++ String.fromFloat r.finishedCutSize.height ++ " in") ]
+                        , dt [] [ text "Artwork" ]
+                        , dd []
+                            [ text
+                                (String.fromInt (Maybe.withDefault 0 r.sourcePageCount)
+                                    ++ (if r.sourcePageCount == Just 1 then
+                                            " page"
+
+                                        else
+                                            " pages"
+                                       )
+                                )
+                            ]
+                        , dt [] [ text "Print size" ]
+                        , dd [] [ text "Actual size (100%) in your printer settings" ]
+                        ]
                     , details
-                        (class "bleed-source-setting"
-                            :: (if r.sourceBleedOverride /= Nothing then
+                        (class "setup-options trim-options"
+                            :: (if r.sourceBleedOverride /= Nothing || r.bleedOption == A.BleedOptionScaleToBleed || Dict.member "invalid:source-bleed" m.drafts || Dict.member "invalid:created-bleed" m.drafts then
                                     [ attribute "open" "" ]
 
                                 else
                                     []
                                )
                         )
-                        [ summary [ class "bleed-status" ]
-                            [ if hasDetectedBleed && r.sourceBleedOverride == Nothing then
-                                span [ class "bleed-detected-check", attribute "aria-hidden" "true" ] [ text "✓" ]
+                        [ summary [] [ text "Trim and bleed options" ]
+                        , div [ class "setup-options-content" ]
+                            [ details
+                                (class "bleed-source-setting"
+                                    :: (if r.sourceBleedOverride /= Nothing || Dict.member "invalid:source-bleed" m.drafts then
+                                            [ attribute "open" "" ]
 
-                              else
-                                text ""
-                            , span [ class "bleed-status-copy" ]
-                                [ strong []
-                                    [ text
-                                        (if r.sourceBleedOverride /= Nothing then
-                                            "Manual PDF bleed"
+                                        else
+                                            []
+                                       )
+                                )
+                                [ summary [ class "bleed-status" ]
+                                    [ if hasDetectedBleed && r.sourceBleedOverride == Nothing then
+                                        span [ class "bleed-detected-check", attribute "aria-hidden" "true" ] [ text "✓" ]
 
-                                         else if hasDetectedBleed then
-                                            "PDF bleed detected"
+                                      else
+                                        text ""
+                                    , span [ class "bleed-status-copy" ]
+                                        [ strong []
+                                            [ text
+                                                (if r.sourceBleedOverride /= Nothing then
+                                                    "Manual PDF bleed"
 
-                                         else
-                                            "No uniform bleed detected"
-                                        )
+                                                 else if hasDetectedBleed then
+                                                    "PDF bleed detected"
+
+                                                 else
+                                                    "No uniform bleed detected"
+                                                )
+                                            ]
+                                        , if hasDetectedBleed || r.sourceBleedOverride /= Nothing then
+                                            span [] [ text (String.fromFloat bleedAmount ++ " in per side") ]
+
+                                          else
+                                            text ""
+                                        ]
+                                    , span [ class "bleed-edit-label" ]
+                                        [ text
+                                            (if hasDetectedBleed || r.sourceBleedOverride /= Nothing then
+                                                "Edit"
+
+                                             else
+                                                "Enter manually"
+                                            )
+                                        ]
                                     ]
-                                , if hasDetectedBleed || r.sourceBleedOverride /= Nothing then
-                                    span [] [ text (String.fromFloat bleedAmount ++ " in per side") ]
+                                , numberField m "PDF bleed per side (in)" "source-bleed" bleedAmount
+                                , if r.sourceBleedOverride /= Nothing then
+                                    btn "Use auto-detected bleed" (Toggle "clear-bleed")
 
                                   else
                                     text ""
                                 ]
-                            , span [ class "bleed-edit-label" ]
-                                [ text
-                                    (if hasDetectedBleed || r.sourceBleedOverride /= Nothing then
-                                        "Edit"
+                            , choices "Artwork at the cut line"
+                                "bleed"
+                                (if r.bleedOption == A.BleedOptionScaleToBleed then
+                                    "scaleToBleed"
 
-                                     else
-                                        "Enter manually"
-                                    )
-                                ]
+                                 else
+                                    "useAsIs"
+                                )
+                                [ ( "useAsIs", "Keep fitted placement" ), ( "scaleToBleed", "Scale to add bleed" ) ]
+                            , if r.bleedOption == A.BleedOptionScaleToBleed then
+                                numberField m "Extend per side (in)" "created-bleed" r.createdBleedAmount
+
+                              else
+                                text ""
+                            , p [ class "field-help" ] [ text "Bleed extends artwork beyond the cut line to help avoid white edges after trimming." ]
                             ]
-                        , numberField m "PDF bleed per side (in)" "source-bleed" bleedAmount
-                        , if r.sourceBleedOverride /= Nothing then
-                            btn "Use auto-detected bleed" (Toggle "clear-bleed")
-
-                          else
-                            text ""
                         ]
-                    , choices "Artwork at the cut line"
-                        "bleed"
-                        (if r.bleedOption == A.BleedOptionScaleToBleed then
-                            "scaleToBleed"
-
-                         else
-                            "useAsIs"
-                        )
-                        [ ( "useAsIs", "Keep fitted placement" ), ( "scaleToBleed", "Scale to add bleed" ) ]
-                    , if r.bleedOption == A.BleedOptionScaleToBleed then
-                        numberField m "Extend per side (in)" "created-bleed" r.createdBleedAmount
-
-                      else
-                        text ""
-                    , div [ class "production-notes" ] (Maybe.map (.warnings >> List.map (\w -> p [ class "field-help" ] [ text (w.problem ++ " " ++ w.impact ++ " " ++ w.fix) ])) m.layout |> Maybe.withDefault [])
+                    , div [ class "production-notes", attribute "aria-label" "Print warnings" ] (Maybe.map (.warnings >> List.map (\w -> p [ class "field-help" ] [ text (w.problem ++ " " ++ w.impact ++ " " ++ w.fix) ])) m.layout |> Maybe.withDefault [])
                     ]
     in
     Keyed.node "section"
-        [ id "gang-setup-panel", class "gang-panel gang-setup elm-setup", attribute "aria-label" "Print setup" ]
+        [ id "gang-setup-panel", class "gang-panel gang-setup elm-setup", attribute "role" "tabpanel", attribute "aria-labelledby" "gang-setup-tab" ]
         [ ( "tabs"
           , nav [ class "setup-stepper", attribute "aria-label" "Print setup" ]
                 [ ol [ attribute "role" "tablist", attribute "aria-label" "Print setup options" ]
@@ -1009,25 +1246,65 @@ setupView m =
                                     (SetStep i)
                                 ]
                         )
-                        [ "Size", "Sheet", "Bleed" ]
+                        [ "Size", "Sheet", "Review" ]
                     )
                 ]
           )
         , ( "fields-" ++ String.fromInt m.step
           , fieldset [ class "gang-setup-fields", disabled m.busy ]
                 [ div [ id "setup-tab-panel", class "setup-step-panel", attribute "role" "tabpanel", attribute "aria-labelledby" ("setup-tab-" ++ String.fromInt m.step), tabindex 0 ]
-                    (h3 [ class "visually-hidden" ] [ text title ] :: controls)
+                    (p [ class "setup-progress" ]
+                        [ text
+                            ("Step "
+                                ++ String.fromInt (m.step + 1)
+                                ++ " of 3 · "
+                                ++ (if m.step == 2 then
+                                        "Review and download"
+
+                                    else
+                                        "Set up your print sheet"
+                                   )
+                            )
+                        ]
+                        :: h3 [ class "visually-hidden" ] [ text title ]
+                        :: controls
+                    )
                 ]
           )
         , ( "actions"
           , div [ class "setup-step-actions elm-setup-actions" ]
-                [ Button.content [ attribute "aria-label" "Back", Html.Attributes.title "Previous setup step" ] { variant = Button.Secondary, disabled = m.step == 0 || m.busy, busy = False, className = "da-button--icon ghost-button setup-back-button" } [ setupArrow False ] (SetStep (m.step - 1))
+                [ if m.step > 0 then
+                    Button.content []
+                        { variant = Button.Secondary, disabled = m.busy, busy = False, className = "ghost-button setup-back-button" }
+                        [ setupArrow False
+                        , text
+                            (if m.step == 1 then
+                                "Back: Size"
+
+                             else
+                                "Back: Sheet"
+                            )
+                        ]
+                        (SetStep (m.step - 1))
+
+                  else
+                    text ""
                 , if m.step == 2 then
                     Button.content [] { variant = Button.Primary, disabled = not (setupValid m) || m.busy || not m.layoutReady, busy = False, className = "primary-button setup-download-button" } [ text "Download imposed PDF" ] Submit
 
                   else
-                    text ""
-                , Button.content [ attribute "aria-label" "Continue", Html.Attributes.title "Next setup step" ] { variant = Button.Primary, disabled = m.step == 2 || m.busy, busy = False, className = "da-button--icon primary-button setup-continue-button" } [ setupArrow True ] (SetStep (m.step + 1))
+                    Button.content []
+                        { variant = Button.Primary, disabled = m.busy, busy = False, className = "primary-button setup-continue-button" }
+                        [ text
+                            (if m.step == 0 then
+                                "Next: Sheet"
+
+                             else
+                                "Next: Review"
+                            )
+                        , setupArrow True
+                        ]
+                        (SetStep (m.step + 1))
                 ]
           )
         ]
@@ -1054,6 +1331,9 @@ sheetName s =
 toolbarView : Model -> Html Msg
 toolbarView m =
     let
+        sheetCount =
+            Maybe.map .sheetsRequired m.layout |> Maybe.withDefault 1
+
         fit =
             Maybe.withDefault { mode = A.ArtworkFitModeContain, position = { x = 0.5, y = 0.5 } } m.request.artworkFit
 
@@ -1087,6 +1367,17 @@ toolbarView m =
                 , options = fieldOptions [ ( "contain", "Fit" ), ( "cover", "Fill" ), ( "stretch", "Stretch" ) ]
                 }
             ]
+        , details [ class "toolbar-more" ]
+            [ summary [] [ text "Artwork tools" ]
+            , div [ class "toolbar-more-actions" ]
+                [ Button.view [ id "organize-toolbar" ] { variant = Button.Secondary, disabled = m.busy, busy = False, className = "" } "Organize pages" OpenPages
+                , div [ class "elm-presets-menu" ]
+                    [ Popover.trigger [] presets "Presets" (SetPresetsOpen (not m.presetsOpen))
+                    , Popover.view [] presets [ savedView m ]
+                    ]
+                , p [ class "field-help" ] [ text fittingDescription ]
+                ]
+            ]
         , div [ class "preview-side-controls", attribute "role" "group", attribute "aria-label" "Preview side" ]
             [ if m.request.sides == A.SidesDouble then
                 btn
@@ -1103,14 +1394,26 @@ toolbarView m =
             ]
         , div [ class "elm-preview-controls" ]
             [ div [ class "sheet-preview-nav" ]
-                [ span [ class "sheet-nav-status", attribute "role" "status" ] [ text ("Sheet " ++ String.fromInt (m.sheet + 1) ++ " of " ++ String.fromInt (Maybe.map .sheetsRequired m.layout |> Maybe.withDefault 1)) ]
-                , Button.content [ attribute "aria-label" "Previous sheet" ] { variant = Button.Secondary, disabled = m.sheet == 0, busy = False, className = "ghost-button sheet-nav-button previous" } [ span [ class "sheet-nav-label" ] [ text "Previous sheet" ] ] (Navigate (Basics.max 0 (m.sheet - 1)) m.back)
-                , Button.content [ attribute "aria-label" "Next sheet" ] { variant = Button.Secondary, disabled = m.sheet + 1 >= (Maybe.map .sheetsRequired m.layout |> Maybe.withDefault 1), busy = False, className = "ghost-button sheet-nav-button next" } [ span [ class "sheet-nav-label" ] [ text "Next sheet" ] ] (Navigate (m.sheet + 1) m.back)
+                [ span [ class "sheet-nav-status", attribute "role" "status" ]
+                    [ text
+                        (if sheetCount == 1 then
+                            "1 print sheet"
+
+                         else
+                            "Sheet " ++ String.fromInt (m.sheet + 1) ++ " of " ++ String.fromInt sheetCount
+                        )
+                    ]
+                , if sheetCount > 1 then
+                    Button.content [ attribute "aria-label" "Previous sheet" ] { variant = Button.Secondary, disabled = m.sheet == 0, busy = False, className = "ghost-button sheet-nav-button previous" } [ span [ class "sheet-nav-label" ] [ text "Previous sheet" ] ] (Navigate (Basics.max 0 (m.sheet - 1)) m.back)
+
+                  else
+                    text ""
+                , if sheetCount > 1 then
+                    Button.content [ attribute "aria-label" "Next sheet" ] { variant = Button.Secondary, disabled = m.sheet + 1 >= sheetCount, busy = False, className = "ghost-button sheet-nav-button next" } [ span [ class "sheet-nav-label" ] [ text "Next sheet" ] ] (Navigate (m.sheet + 1) m.back)
+
+                  else
+                    text ""
                 ]
-            ]
-        , div [ class "elm-presets-menu" ]
-            [ Popover.trigger [] presets "Presets" (SetPresetsOpen (not m.presetsOpen))
-            , Popover.view [] presets [ savedView m ]
             ]
         ]
 

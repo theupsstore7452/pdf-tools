@@ -133,12 +133,21 @@ pub fn app_with_frontend_dist(
     };
     let impose_intake_route = Router::new()
         .route("/gang-up/sources", post(super::gang_up::prepare_source))
+        .route("/pdf/workspaces", post(super::pages::prepare))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             limit_multipart_uploads,
         ))
         .layer(DefaultBodyLimit::disable());
     let operation_routes = Router::new()
+        .route(
+            "/pdf/workspaces/{id}/previews",
+            post(super::pages::thumbnails).layer(DefaultBodyLimit::max(MAX_LAYOUT_JSON_BYTES)),
+        )
+        .route(
+            "/gang-up/sources/{id}/order",
+            post(super::pages::order_source).layer(DefaultBodyLimit::max(MAX_LAYOUT_JSON_BYTES)),
+        )
         .route(
             "/gang-up/layout",
             post(super::gang_up::layout).layer(DefaultBodyLimit::max(MAX_LAYOUT_JSON_BYTES)),

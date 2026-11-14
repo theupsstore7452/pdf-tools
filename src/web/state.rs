@@ -10,7 +10,6 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use crate::{
     adapters::{
         initialize_impose_staging, ImposeUploadLimits, DEFAULT_IMPOSE_UPLOAD_TIMEOUT_SECONDS,
-        DEFAULT_MAX_IMPOSE_UPLOAD_BYTES,
     },
     error::{AppError, AppResult},
     imposition::{PresetStore, RecentGangUpStore, SourceSessionStore},
@@ -88,8 +87,7 @@ impl AppState {
             })
             .transpose()?
             .map(|value| megabytes_to_bytes("PDF_TOOLS_MAX_IMPOSE_UPLOAD_MB", value))
-            .transpose()?
-            .unwrap_or(DEFAULT_MAX_IMPOSE_UPLOAD_BYTES);
+            .transpose()?;
         let impose_upload_timeout_seconds = bounded_setting(
             "PDF_TOOLS_IMPOSE_UPLOAD_TIMEOUT_SECONDS",
             read_env_usize(
@@ -330,7 +328,7 @@ impl AppState {
     ) -> AppResult<Self> {
         let mut state = Self::for_tests(pdfium)?;
         state.impose_upload_limits = ImposeUploadLimits::new(
-            max_total_bytes,
+            Some(max_total_bytes),
             std::time::Duration::from_secs(DEFAULT_IMPOSE_UPLOAD_TIMEOUT_SECONDS as u64),
         );
         Ok(state)
@@ -359,7 +357,7 @@ impl AppState {
             max_render_pages: 100,
             max_download_bytes,
             impose_upload_limits: ImposeUploadLimits::new(
-                DEFAULT_MAX_IMPOSE_UPLOAD_BYTES,
+                None,
                 std::time::Duration::from_secs(DEFAULT_IMPOSE_UPLOAD_TIMEOUT_SECONDS as u64),
             ),
             preset_store: PresetStore::new(data_dir.clone()),

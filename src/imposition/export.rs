@@ -586,21 +586,16 @@ fn add_shared_resource_sheet(
                 placement_clip_rect(layout, placement, side),
             )
         };
-        let rotate_back_180 = side == SheetSide::Back
-            && layout
-                .duplex
-                .as_ref()
-                .is_some_and(|duplex| duplex.rotate_back_180);
         let matrix = placement_matrix(
             resolved,
             form.size,
-            (layout.rotation_degrees
+            (side_rotation(layout, side)
                 + layout
                     .page_plans
                     .get(source_index)
                     .map_or(0, |plan| plan.rotation_degrees))
                 % 360,
-            rotate_back_180,
+            false,
         );
         operations.push(Operation::new("q", Vec::new()));
         operations.push(Operation::new(
@@ -754,7 +749,7 @@ fn resolve_page_plan(
     let mapped_clip = resolve_side_placement(layout, rect(clip), side);
     let mut dx = artwork.x - clip.x;
     let mut dy = artwork.y - clip.y;
-    if side == SheetSide::Back && layout.duplex.as_ref().is_some_and(|d| d.rotate_back_180) {
+    if (side_rotation(layout, side) + 360 - layout.rotation_degrees) % 360 == 180 {
         dx = clip.width - dx - artwork.width;
         dy = clip.height - dy - artwork.height;
     }
@@ -838,13 +833,8 @@ fn resolve_side_placement(
         return placement;
     }
 
-    let landscape = layout.parent_sheet_size.width > layout.parent_sheet_size.height;
-    let base_mirror_x = match duplex.flip_edge {
-        super::model::DuplexFlipEdge::LongEdge => !landscape,
-        super::model::DuplexFlipEdge::ShortEdge => landscape,
-    };
-    let mirror_x = base_mirror_x != duplex.rotate_back_180;
-    let mirror_y = base_mirror_x == duplex.rotate_back_180;
+    let mirror_x = duplex.mirrors_x(layout.parent_sheet_size);
+    let mirror_y = !mirror_x;
 
     ResolvedPlacement {
         x: if mirror_x {
@@ -859,6 +849,16 @@ fn resolve_side_placement(
         },
         width: placement.width,
         height: placement.height,
+    }
+}
+
+fn side_rotation(layout: &LayoutResult, side: SheetSide) -> u16 {
+    if side == SheetSide::Back {
+        layout.duplex.as_ref().map_or(layout.rotation_degrees, |d| {
+            d.back_rotation(layout.parent_sheet_size, layout.rotation_degrees)
+        })
+    } else {
+        layout.rotation_degrees
     }
 }
 
@@ -1091,8 +1091,8 @@ mod tests {
                             let matrix = placement_matrix(
                                 art,
                                 plan.source_pdf_size,
-                                (preview.rotation_degrees + plan.rotation_degrees) % 360,
-                                index == 1 && rotate_back,
+                                (side_rotation(&preview, side) + plan.rotation_degrees) % 360,
+                                false,
                             );
                             let operations = Content::decode(&output.get_page_content(id))
                                 .unwrap()

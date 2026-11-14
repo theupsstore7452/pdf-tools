@@ -86,6 +86,13 @@ pub(crate) async fn merge_form(
         25,
         format!("Preparing {} PDFs", form.files.len()),
     )?;
+    let form = super::pages::ordered_form(
+        state.clone(),
+        form,
+        operation_permit.clone(),
+        progress.clone(),
+    )
+    .await?;
     let files = form.files;
     let pdfium = state.pdfium();
     let progress_for_cpu = progress.clone();
@@ -111,6 +118,16 @@ pub(crate) async fn split_form(
 ) -> AppResult<FileDownload> {
     let pages = PageSelection::parse(form.required_field("pages")?)?;
     let output_mode = pdf_split::ExtractOutputMode::from_form(&form)?;
+    if form.files.len() != 1 {
+        return Err(AppError::bad_request("split requires a PDF input"));
+    }
+    let form = super::pages::ordered_form(
+        state.clone(),
+        form,
+        operation_permit.clone(),
+        progress.clone(),
+    )
+    .await?;
     let file = require_one_pdf(form, "split requires a PDF input")?;
     let output_kind = match output_mode {
         pdf_split::ExtractOutputMode::Individual => OutputKind::ExtractedPages,

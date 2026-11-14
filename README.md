@@ -18,6 +18,29 @@ Images to PDF keeps this workflow deliberately simple: each ordered PNG or JPEG
 becomes one PDF page at its natural 300 DPI size. Page resizing, orientation,
 fitting, and margins belong to other workflows.
 
+## Put pages in order
+
+Choose **Organize pages** beside Files, in the impose toolbar, or in the
+Workspace menu. Drag a page, use Move earlier/later, or focus its row and press
+Alt+Up/Down. Open **Move, reverse, or reset pages** to move a selected page to an
+exact position, reverse the order, or restore the original order. Each thumbnail
+shows its new position and its original filename/page number.
+
+**Apply page order** commits the sequence across PDF to images, Extract pages,
+Combine PDFs, Images to PDF, and Impose artwork. Page ranges refer to the new
+positions. Cancel retains the previous order. Changing the selected files starts
+a new page sequence. Print presets keep their settings; ordering belongs to the
+current artwork workspace.
+
+In duplex imposition, every two consecutive pages form a front/back pair.
+Artwork overrides follow their pages. Copies follow pairs that stay intact;
+newly formed pairs start with one copy. Review the finished front/back proof
+after changing pairs.
+
+The organizer displays at most 12 pages at once and requests at most four small
+thumbnails per batch, each at most 240×320 pixels. Page ordering preserves PDF
+content streams and page geometry. It does not rasterize the print-ready PDF.
+
 ## Make customer artwork into a print-ready flyer
 
 Choose **Impose artwork**. **Width** and **Height** automatically
@@ -28,6 +51,14 @@ finished sizes with uniform 0.0625-, 0.125-, or 0.25-inch bleed are inferred; ot
 PDFs keep their page dimensions. Preview and export preserve the supplied bleed
 outside that cut without shrinking the artwork. Images retain their full natural
 300 DPI dimensions, including when their dimensions resemble a PDF with bleed.
+When the cut is larger than the selected print sheet, PDF Tools reduces it
+proportionally to the largest fit, considering an allowed sheet quarter-turn,
+created bleed, and custom margins. For example, 72×48-inch artwork starts at
+18×12 inches on a 12×18 sheet. The Size panel explains the adjustment. An
+automatic size follows paper changes until you edit the finished size or choose
+a saved setup. The original PDF artwork remains intact; previews use bounded
+rasters and export applies placement transforms.
+
 These fields are always editable. Replacing artwork updates the default
 size until you edit it, choose a finished orientation, or apply a saved setup;
 those choices are retained when artwork changes. Mixed-size artwork shares the
@@ -62,10 +93,21 @@ contains quantity, sheet size, printing, gutter, margin, and duplex settings.
 Size contains finished dimensions, orientation, arrangement, and custom-grid
 settings. All three tabs are available immediately, including while settings are incomplete or a preview
 is loading. Use the arrow keys, Home, or End to navigate the tabs. Open the
-advanced sheet settings to adjust gutters, custom margins, or duplex behavior.
+advanced sheet settings to adjust gutters, custom margins, or rotate the entire back sheet.
 On narrow screens, the toolbar stays
 outside the Setup panel while **Preview** remains focused on inspecting the
 sheet.
+
+For **Double-sided** printing, choose the printer's **Duplex flip edge** in
+Sheet. Back positions and artwork direction account for the sheet orientation
+and any layout quarter-turn, keeping paired pieces' tops together after cutting.
+The preview names the required printer flip edge, the sheet side, and its PDF
+page. **Check finished front & back** shows the selected cut piece's two sides;
+select another impression to check its pair. Independent artwork rotations and
+crop positions remain visible in that proof. Print at actual size (100%) and
+confirm one test sheet before the full run. The advanced **Rotate back side
+180°** setting turns the whole back sheet and changes the required printer flip
+edge; the preview's print instructions update accordingly.
 
 Red dashed cut paths are always visible on the sheet preview. Black dotted
 rectangles show the outside bleed bounds where bleed is present, and the sheet
@@ -152,8 +194,8 @@ repository's `.env.example` lists the available settings:
 | `PDF_TOOLS_DATA_PATH` | `./data` | Persistent host directory mounted at `/app/data` |
 | `PUID` / `PGID` | `1000` | Host IDs used to own persistent files |
 | `MAX_UPLOAD_MB` | unset | Optional limit for generic multipart operations; canonical impose intake has separate safeguards |
-| `PDF_TOOLS_MAX_IMPOSE_UPLOAD_MB` | `512` | Total compressed artwork bytes accepted by one canonical impose upload |
-| `PDF_TOOLS_IMPOSE_UPLOAD_TIMEOUT_SECONDS` | `120` | Maximum elapsed time spent reading one canonical impose upload |
+| `PDF_TOOLS_MAX_IMPOSE_UPLOAD_MB` | unset | Optional total artwork upload limit; impose uploads stream to disk without a default size cap |
+| `PDF_TOOLS_IMPOSE_UPLOAD_TIMEOUT_SECONDS` | `120` | Maximum idle time between reads of an impose upload; active uploads can continue for longer |
 | `MAX_RENDER_PAGES` | unset | Optional page limit for render and split requests |
 | `MAX_DOWNLOAD_MB` | unset | Optional generated-download size limit |
 | `PDF_TOOLS_CPU_PERMITS` | up to 4 host CPUs | Shared workers for PDF and image processing |
@@ -163,12 +205,14 @@ repository's `.env.example` lists the available settings:
 Set `PUID` and `PGID` to the output of `id -u` and `id -g` if the deployment
 account does not use ID `1000`.
 
-When `MAX_UPLOAD_MB` is unset, generic uploads have no application-wide byte
-limit. Canonical impose sources remain disk-streamed and are independently
-bounded by `PDF_TOOLS_MAX_IMPOSE_UPLOAD_MB` and
-`PDF_TOOLS_IMPOSE_UPLOAD_TIMEOUT_SECONDS`. Setting `MAX_UPLOAD_MB` limits
+Uploads have no default file-size limit, including individual images and batches.
+Canonical impose sources stream to disk. Files totaling 50 MiB or more show a
+large-file loading message alongside progress and Cancel. Active uploads have no
+overall time limit; stalled reads time out after 120 seconds. Administrators can
+opt into a size cap with `PDF_TOOLS_MAX_IMPOSE_UPLOAD_MB` for impose sources.
+Setting `MAX_UPLOAD_MB` limits
 conversion, merge, split, and legacy job multipart endpoints; it does not
-replace the canonical `/gang-up/sources` safeguards.
+replace the staged `/gang-up/sources` and `/pdf/workspaces` safeguards.
 
 PDFium calls run on bounded blocking workers and are serialized because the
 native library is process-global. Cancellation and deadlines are checked at
@@ -340,3 +384,9 @@ This starts a disposable loopback-bound container, verifies compressed assets,
 runs the same output-inspecting browser acceptance, and physically removes then
 restores the Elm bundle to verify startup recovery. It does not replace Compose
 services or mount persistent shop data.
+
+The focused organizer and oversized-artwork browser regressions can be run with:
+
+```sh
+python scripts/page-organization-regressions.py --url http://127.0.0.1:3001
+```

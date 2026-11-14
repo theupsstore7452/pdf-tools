@@ -13,22 +13,22 @@ const MULTIPART_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 const MAX_TEXT_FIELD_BYTES: usize = 64 * 1024;
 const MAX_MULTIPART_TEXT_FIELDS: usize = 200;
 const MAX_MULTIPART_FILES: usize = 512;
-const MAX_MULTIPART_FILE_BYTES: usize = 512 * 1024 * 1024;
-const MAX_MULTIPART_TOTAL_FILE_BYTES: usize = 1024 * 1024 * 1024;
 const IMPOSE_STAGING_DIRECTORY: &str = "impose-staging";
 const IMPOSE_STAGING_PREFIX: &str = "pdf-tools-impose-";
 const IMPOSE_STAGING_SUFFIX: &str = ".upload";
-pub(crate) const DEFAULT_MAX_IMPOSE_UPLOAD_BYTES: usize = 512 * 1024 * 1024;
 pub(crate) const DEFAULT_IMPOSE_UPLOAD_TIMEOUT_SECONDS: usize = 120;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ImposeUploadLimits {
-    max_total_bytes: usize,
+    max_total_bytes: Option<usize>,
     read_timeout: std::time::Duration,
 }
 
 impl ImposeUploadLimits {
-    pub(crate) const fn new(max_total_bytes: usize, read_timeout: std::time::Duration) -> Self {
+    pub(crate) const fn new(
+        max_total_bytes: Option<usize>,
+        read_timeout: std::time::Duration,
+    ) -> Self {
         Self {
             max_total_bytes,
             read_timeout,
@@ -157,32 +157,39 @@ pub(crate) struct StagedImposeForm {
     pub(crate) fields: Vec<(String, String)>,
 }
 
-/// Streams impose sources to disk within an explicit aggregate byte budget and
-/// elapsed read deadline. Staging remains disk-backed throughout intake.
+/// Streams impose sources to disk without a default file-size limit. The read
+/// timeout applies to inactivity, so an active large upload can keep going.
 pub(crate) async fn stage_impose_multipart(
     multipart: Multipart,
     staging_dir: &Path,
     limits: ImposeUploadLimits,
 ) -> AppResult<StagedImposeForm> {
-    tokio::time::timeout(
-        limits.read_timeout,
-        collect_staged_impose_multipart(multipart, staging_dir, limits.max_total_bytes),
-    )
-    .await
-    .map_err(|_| AppError::RequestTimeout("impose upload timed out".to_string()))?
+    collect_staged_impose_multipart(multipart, staging_dir, limits).await
+}
+
+async fn read_upload_part<T>(
+    read: impl std::future::Future<Output = Result<T, axum::extract::multipart::MultipartError>>,
+    idle_timeout: std::time::Duration,
+) -> AppResult<T> {
+    tokio::time::timeout(idle_timeout, read)
+        .await
+        .map_err(|_| AppError::RequestTimeout("upload stalled; please retry".to_string()))?
+        .map_err(AppError::from)
 }
 
 async fn collect_staged_impose_multipart(
     mut multipart: Multipart,
     staging_dir: &Path,
-    max_total_bytes: usize,
+    limits: ImposeUploadLimits,
 ) -> AppResult<StagedImposeForm> {
     let mut staged = Vec::new();
     let mut fields = Vec::new();
     let mut text_field_count = 0usize;
     let mut total_file_bytes = 0usize;
 
-    while let Some(mut field) = multipart.next_field().await? {
+    while let Some(mut field) =
+        read_upload_part(multipart.next_field(), limits.read_timeout).await?
+    {
         let name = field.name().unwrap_or("").to_string();
         if matches!(name.as_str(), "file" | "files" | "files[]") {
             if staged.len() >= MAX_MULTIPART_FILES {
@@ -209,12 +216,15 @@ async fn collect_staged_impose_multipart(
                     )
                 })?;
             let mut size = 0usize;
-            while let Some(chunk) = field.chunk().await? {
+            while let Some(chunk) = read_upload_part(field.chunk(), limits.read_timeout).await? {
                 size = size.checked_add(chunk.len()).ok_or_else(|| {
                     AppError::payload_too_large("uploaded file size cannot be represented")
                 })?;
-                total_file_bytes =
-                    checked_impose_upload_growth(total_file_bytes, chunk.len(), max_total_bytes)?;
+                total_file_bytes = checked_impose_upload_growth(
+                    total_file_bytes,
+                    chunk.len(),
+                    limits.max_total_bytes,
+                )?;
                 output.write_all(&chunk).await.map_err(|error| {
                     AppError::storage_cause("could not write staged impose source", error)
                 })?;
@@ -235,7 +245,7 @@ async fn collect_staged_impose_multipart(
                 )));
             }
             let mut bytes = Vec::new();
-            while let Some(chunk) = field.chunk().await? {
+            while let Some(chunk) = read_upload_part(field.chunk(), limits.read_timeout).await? {
                 let new_len = bytes.len().checked_add(chunk.len()).ok_or_else(|| {
                     AppError::payload_too_large("multipart text field is too large")
                 })?;
@@ -266,14 +276,14 @@ async fn collect_staged_impose_multipart(
 fn checked_impose_upload_growth(
     current_total_bytes: usize,
     chunk_bytes: usize,
-    max_total_bytes: usize,
+    max_total_bytes: Option<usize>,
 ) -> AppResult<usize> {
     let total_bytes = current_total_bytes
         .checked_add(chunk_bytes)
         .ok_or_else(|| {
             AppError::payload_too_large("total impose upload size cannot be represented")
         })?;
-    if total_bytes > max_total_bytes {
+    if let Some(max_total_bytes) = max_total_bytes.filter(|max| total_bytes > *max) {
         return Err(AppError::payload_too_large(format!(
             "impose artwork exceeds the configured {} MiB total upload limit",
             max_total_bytes / (1024 * 1024)
@@ -365,9 +375,7 @@ impl FormData {
 }
 
 pub(crate) async fn read_multipart(multipart: Multipart) -> AppResult<FormData> {
-    tokio::time::timeout(MULTIPART_READ_TIMEOUT, collect_multipart(multipart))
-        .await
-        .map_err(|_| AppError::RequestTimeout("upload timed out".to_string()))?
+    collect_multipart(multipart).await
 }
 
 async fn collect_multipart(mut multipart: Multipart) -> AppResult<FormData> {
@@ -375,7 +383,9 @@ async fn collect_multipart(mut multipart: Multipart) -> AppResult<FormData> {
     let mut text_field_count = 0usize;
     let mut total_file_bytes = 0usize;
 
-    while let Some(mut field) = multipart.next_field().await? {
+    while let Some(mut field) =
+        read_upload_part(multipart.next_field(), MULTIPART_READ_TIMEOUT).await?
+    {
         let name = field.name().unwrap_or("").to_string();
         if name.is_empty() {
             continue;
@@ -392,10 +402,12 @@ async fn collect_multipart(mut multipart: Multipart) -> AppResult<FormData> {
                 )));
             }
             let mut bytes = Vec::new();
-            while let Some(chunk) = field.chunk().await? {
+            while let Some(chunk) = read_upload_part(field.chunk(), MULTIPART_READ_TIMEOUT).await? {
                 let (file_len, total_len) =
                     checked_file_growth(bytes.len(), total_file_bytes, chunk.len())?;
-                bytes.reserve(file_len - bytes.len());
+                bytes.try_reserve(file_len - bytes.len()).map_err(|error| {
+                    AppError::storage_cause("could not allocate upload buffer", error.into())
+                })?;
                 bytes.extend_from_slice(&chunk);
                 total_file_bytes = total_len;
             }
@@ -414,7 +426,7 @@ async fn collect_multipart(mut multipart: Multipart) -> AppResult<FormData> {
                 )));
             }
             let mut bytes = Vec::new();
-            while let Some(chunk) = field.chunk().await? {
+            while let Some(chunk) = read_upload_part(field.chunk(), MULTIPART_READ_TIMEOUT).await? {
                 let new_len = bytes.len().checked_add(chunk.len()).ok_or_else(|| {
                     AppError::payload_too_large("multipart text field is too large")
                 })?;
@@ -445,16 +457,6 @@ fn checked_file_growth(
     let total_bytes = current_total_bytes
         .checked_add(chunk_bytes)
         .ok_or_else(|| AppError::payload_too_large("multipart files are too large"))?;
-    if file_bytes > MAX_MULTIPART_FILE_BYTES {
-        return Err(AppError::payload_too_large(format!(
-            "each uploaded file is limited to {MAX_MULTIPART_FILE_BYTES} bytes"
-        )));
-    }
-    if total_bytes > MAX_MULTIPART_TOTAL_FILE_BYTES {
-        return Err(AppError::payload_too_large(format!(
-            "multipart files are limited to {MAX_MULTIPART_TOTAL_FILE_BYTES} total bytes"
-        )));
-    }
     Ok((file_bytes, total_bytes))
 }
 
@@ -559,6 +561,178 @@ pub(crate) fn require_one_impose_source(form: FormData, context: &str) -> AppRes
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::{to_bytes, Body},
+        extract::{DefaultBodyLimit, State},
+        http::{Request, StatusCode},
+        routing::post,
+        Router,
+    };
+    use std::{
+        collections::VecDeque,
+        convert::Infallible,
+        future::Future,
+        pin::Pin,
+        task::{Context, Poll},
+        time::Duration,
+    };
+    use tower::ServiceExt;
+
+    // Reuse the same backing bytes for every frame so the large-upload
+    // regression exercises disk streaming without allocating a huge request.
+    struct UploadBody {
+        frames: VecDeque<Bytes>,
+        delay: Pin<Box<tokio::time::Sleep>>,
+        interval: Duration,
+    }
+
+    impl http_body::Body for UploadBody {
+        type Data = Bytes;
+        type Error = Infallible;
+
+        fn poll_frame(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<Option<Result<http_body::Frame<Bytes>, Infallible>>> {
+            if self.frames.is_empty() {
+                return Poll::Ready(None);
+            }
+            if self.delay.as_mut().poll(cx).is_pending() {
+                return Poll::Pending;
+            }
+            let deadline = tokio::time::Instant::now() + self.interval;
+            self.delay.as_mut().reset(deadline);
+            Poll::Ready(
+                self.frames
+                    .pop_front()
+                    .map(|bytes| Ok(http_body::Frame::data(bytes))),
+            )
+        }
+    }
+
+    fn streamed_request(chunk_bytes: usize, chunks: usize, interval: Duration) -> Request<Body> {
+        let mut frames = VecDeque::from([Bytes::from_static(
+            b"--upload-test\r\nContent-Disposition: form-data; name=\"file\"; filename=\"large.pdf\"\r\n\r\n",
+        )]);
+        let chunk = Bytes::from(vec![b' '; chunk_bytes]);
+        frames.extend(std::iter::repeat_n(chunk, chunks));
+        frames.push_back(Bytes::from_static(b"\r\n--upload-test--\r\n"));
+        Request::post("/")
+            .header("Content-Type", "multipart/form-data; boundary=upload-test")
+            .body(Body::new(UploadBody {
+                frames,
+                delay: Box::pin(tokio::time::sleep(Duration::ZERO)),
+                interval,
+            }))
+            .unwrap()
+    }
+
+    async fn stage_test_upload(
+        State((directory, limits)): State<(PathBuf, ImposeUploadLimits)>,
+        multipart: Multipart,
+    ) -> AppResult<String> {
+        let form = stage_impose_multipart(multipart, &directory, limits).await?;
+        Ok(form.files[0].byte_len()?.to_string())
+    }
+
+    fn staging_router(directory: PathBuf, limits: ImposeUploadLimits) -> Router {
+        Router::new()
+            .route("/", post(stage_test_upload))
+            .layer(DefaultBodyLimit::disable())
+            .with_state((directory, limits))
+    }
+
+    #[tokio::test]
+    async fn impose_streams_more_than_512_mib_without_a_default_size_cap() {
+        let directory = staging_directory("large-stream");
+        let response = staging_router(
+            directory.clone(),
+            ImposeUploadLimits::new(None, Duration::from_secs(5)),
+        )
+        .oneshot(streamed_request(1024 * 1024, 513, Duration::ZERO))
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            to_bytes(response.into_body(), 100).await.unwrap(),
+            (513 * 1024 * 1024).to_string()
+        );
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
+        std::fs::remove_dir_all(directory.parent().unwrap()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn explicit_impose_cap_rejects_upload_and_cleans_staging() {
+        let directory = staging_directory("configured-cap");
+        let response = staging_router(
+            directory.clone(),
+            ImposeUploadLimits::new(Some(1024), Duration::from_secs(5)),
+        )
+        .oneshot(streamed_request(1024, 2, Duration::ZERO))
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
+        std::fs::remove_dir_all(directory.parent().unwrap()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancelling_upload_removes_partial_staging() {
+        let directory = staging_directory("cancelled-stream");
+        let router = staging_router(
+            directory.clone(),
+            ImposeUploadLimits::new(None, Duration::from_secs(5)),
+        );
+        let task =
+            tokio::spawn(router.oneshot(streamed_request(1024, 100, Duration::from_millis(10))));
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if std::fs::read_dir(&directory)
+                    .unwrap()
+                    .any(|entry| entry.unwrap().metadata().unwrap().len() > 0)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
+        std::fs::remove_dir_all(directory.parent().unwrap()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn active_upload_can_outlast_the_idle_timeout() {
+        let directory = staging_directory("active-stream");
+        let timeout = Duration::from_millis(200);
+        let started = tokio::time::Instant::now();
+        let response = staging_router(directory.clone(), ImposeUploadLimits::new(None, timeout))
+            .oneshot(streamed_request(1024, 12, Duration::from_millis(25)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(started.elapsed() > timeout);
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
+        std::fs::remove_dir_all(directory.parent().unwrap()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn stalled_upload_times_out_and_removes_partial_staging() {
+        let directory = staging_directory("stalled-stream");
+        let response = staging_router(
+            directory.clone(),
+            ImposeUploadLimits::new(None, Duration::from_millis(20)),
+        )
+        .oneshot(streamed_request(1024, 2, Duration::from_millis(100)))
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
+        std::fs::remove_dir_all(directory.parent().unwrap()).unwrap();
+    }
 
     fn staging_directory(label: &str) -> PathBuf {
         let data_dir = std::env::temp_dir().join(format!(
@@ -639,17 +813,27 @@ mod tests {
     }
 
     #[test]
-    fn file_growth_enforces_per_file_and_total_limits() {
-        assert!(checked_file_growth(MAX_MULTIPART_FILE_BYTES, 0, 1).is_err());
-        assert!(checked_file_growth(0, MAX_MULTIPART_TOTAL_FILE_BYTES, 1).is_err());
+    fn file_growth_accepts_large_files_and_still_checks_overflow() {
+        let gib = 1024 * 1024 * 1024;
+        assert_eq!(
+            checked_file_growth(gib, 2 * gib, 1).unwrap(),
+            (gib + 1, 2 * gib + 1)
+        );
+        assert!(checked_file_growth(usize::MAX, 0, 1).is_err());
+        assert!(checked_file_growth(0, usize::MAX, 1).is_err());
         assert_eq!(checked_file_growth(10, 20, 5).unwrap(), (15, 25));
     }
 
     #[test]
     fn impose_upload_growth_enforces_aggregate_limit_with_checked_arithmetic() {
-        assert_eq!(checked_impose_upload_growth(10, 5, 15).unwrap(), 15);
-        assert!(checked_impose_upload_growth(15, 1, 15).is_err());
-        assert!(checked_impose_upload_growth(usize::MAX, 1, usize::MAX).is_err());
+        assert_eq!(checked_impose_upload_growth(10, 5, Some(15)).unwrap(), 15);
+        assert!(checked_impose_upload_growth(15, 1, Some(15)).is_err());
+        assert!(checked_impose_upload_growth(usize::MAX, 1, None).is_err());
+        let gib = 1024 * 1024 * 1024;
+        assert_eq!(
+            checked_impose_upload_growth(gib, gib, None).unwrap(),
+            2 * gib
+        );
     }
 
     #[test]

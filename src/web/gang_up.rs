@@ -45,10 +45,45 @@ pub(crate) async fn prepare_source(
     let staged =
         stage_impose_multipart(multipart, &staging_dir, state.impose_upload_limits()).await?;
     let operation_permit = state.admit_operation()?;
-    super::jobs::create_staged_prepare(state, staged, operation_permit)
+    super::jobs::create_staged_prepare(state, staged, operation_permit, false)
 }
 
 pub(crate) async fn prepare_staged_source(
+    state: Arc<AppState>,
+    staged: StagedImposeForm,
+    operation_permit: OperationPermit,
+    progress: Option<ProgressCallback>,
+) -> AppResult<FileDownload> {
+    let order = staged
+        .fields
+        .iter()
+        .find(|(key, _)| key == "pageOrder")
+        .map(|(_, v)| crate::documents::parse_page_order(v))
+        .transpose()?;
+    let response = prepare_staged_unordered(
+        state.clone(),
+        staged,
+        operation_permit.clone(),
+        progress.clone(),
+    )
+    .await?;
+    let Some(order) = order else {
+        return Ok(response);
+    };
+    let prepared: serde_json::Value = serde_json::from_slice(&response.bytes)
+        .map_err(|e| AppError::internal_cause("Could not read prepared source.", e))?;
+    let id = prepared["sourceId"]
+        .as_str()
+        .ok_or_else(|| AppError::Internal("Missing source ID".to_string()))?
+        .to_string();
+    let result =
+        super::pages::ordered_source(state.clone(), id.clone(), order, operation_permit, progress)
+            .await;
+    let _ = state.source_session_store().delete(&id);
+    result
+}
+
+async fn prepare_staged_unordered(
     state: Arc<AppState>,
     staged: StagedImposeForm,
     operation_permit: OperationPermit,
@@ -196,15 +231,6 @@ fn prepare_staged_artwork(
             .iter()
             .map(|file| gang_up_pdf::ArtworkPageIdentity::first_page(file.filename().to_string()))
             .collect::<Vec<_>>();
-        for file in &image_files {
-            let byte_len = usize::try_from(file.byte_len()?).map_err(|_| {
-                AppError::payload_too_large(format!(
-                    "image `{}` is too large for this server",
-                    file.filename()
-                ))
-            })?;
-            image_pdf::validate_image_input_size(file.filename(), byte_len)?;
-        }
         let images = image_files
             .into_iter()
             .map(StagedImposeUpload::into_image_upload)

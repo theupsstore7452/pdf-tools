@@ -36,6 +36,7 @@ type alias Model =
     , pending : List Selected
     , nextId : Int
     , operation : Operation
+    , preferredTool : Maybe Operation
     , busy : Bool
     , phase : String
     , progress : Int
@@ -54,6 +55,22 @@ type alias Model =
     , outputMode : String
     , chunk : String
     , request : A.LayoutRequest
+    , pageOrder : List Int
+    , pageDraft : List Int
+    , pageOrganizer : Bool
+    , pageSource : Maybe String
+    , pageSourceOwned : Bool
+    , pageSourceOrder : List Int
+    , pageThumbnails : Dict Int String
+    , pageBatch : Int
+    , pageSelected : Int
+    , pagePosition : String
+    , pageToken : Int
+    , pageLoading : Bool
+    , pageError : String
+    , pageOrderState : Reorderable.State
+    , sizeInput : Maybe A.SizeInches
+    , sizeNotice : String
     , source : Maybe A.PreparedSourceResponse
     , revision : Int
     , layout : Maybe A.LayoutResult
@@ -62,6 +79,8 @@ type alias Model =
     , previewToken : Int
     , previewLoading : Bool
     , previewError : String
+    , previewZoom : Int
+    , previewGuides : Bool
     , sheet : Int
     , back : Bool
     , step : Int
@@ -95,6 +114,18 @@ type alias Model =
 type Msg
     = Uploaded Http.Progress
     | Discarded String (Result Http.Error A.PreparedSourceResponse)
+    | OpenPages
+    | ClosePages
+    | ApplyPageOrder
+    | PageBatch Int
+    | PageCommand String
+    | PageSelected Int
+    | PagePosition String
+    | MovePage
+    | PageOrderChanged Reorderable.Change
+    | WorkspacePrepared Int (Result Http.Error ( String, Int ))
+    | OrderedSource Int (Result Http.Error A.PreparedSourceResponse)
+    | WorkspaceDiscarded String (Result Http.Error String)
     | Browse Bool
     | Picked Bool File (List File)
     | Dropped (List File)
@@ -105,6 +136,7 @@ type Msg
     | SetPresetsOpen Bool
     | WorkspaceAction String
     | Switch Operation
+    | ChooseTool Operation
     | Field String String
     | DropdownChanged String String Dropdown.Change
     | Quantity Int String
@@ -131,6 +163,9 @@ type Msg
     | LaidOut Int (Result Http.Error A.LayoutResult)
     | BrowserEvent D.Value
     | Navigate Int Bool
+    | SetPreviewZoom Int
+    | FitPreview
+    | TogglePreviewGuides
     | Lease Time.Posix
     | Catalog String (Result Http.Error D.Value)
     | ApplyPreset String

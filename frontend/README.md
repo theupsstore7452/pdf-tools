@@ -37,7 +37,13 @@ and status lines stay text, and `PDFPV001` preview batches stay binary.
 
 Elm maintains transactional selected/pending files, source-derived finished-size
 defaults and user overrides, separate simplex/duplex quantity drafts, and layout
-revision identities.
+revision identities. `Organizer.elm` owns the draft/committed page sequence and
+maps artwork overrides and repeat quantities by page identity. The organizer
+uses a separate bounded thumbnail cache; it does not replace the source files
+in browser memory. Generic operations receive a `pageOrder` multipart array,
+while imposition orders its prepared source and rebinds server analysis. Invalid
+orders are rejected by Rust before transformation. Failed/late preparations do
+not replace the committed workspace.
 Inspection, prepared jobs, layouts, previews, and downloads reject obsolete
 responses after cancellation or replacement. Failed replacement leaves committed
 files and settings available. Applying a preset preserves artwork and quantity
@@ -55,6 +61,9 @@ the adapter. Startup errors show Retry, including a missing Elm module or missin
 resource ports. Rust/Axum remains the HTTP server.
 
 `bridge.js` stores theme changes as the existing raw `pdf-tools-theme` value.
+Light mode is the default regardless of the OS theme; dark mode is used only
+when the user has saved that preference. Missing, invalid, or unavailable storage
+falls back to light mode, including during initial page startup.
 Storage failures leave the selected theme active for the current tab and send
 `themeStorageError` through `browserEvents` so Elm can show feedback. There is no
 shared browser-library submodule or OCaml toolchain dependency.
@@ -98,6 +107,25 @@ switching, and reduced motion, and saves traces and screenshots under
 The npm lockfile overrides elm-test's transitive Chokidar with 4.0.3 to remove
 the vulnerable legacy watcher dependency. elm-test watches explicit directories
 with globbing disabled; both an initial run and a file-change rerun were verified.
+
+### Interface workflow checks
+
+Against an isolated local server, run:
+
+```sh
+nix develop --no-write-lock-file -c python scripts/interface-browser-regressions.py --url http://127.0.0.1:3001
+```
+
+Run from the repository root. This covers task selection before upload, incompatible-file
+recovery, output summaries and real downloads for all five tools, keyboard activation,
+320px–1440px layouts, short landscape, light/dark themes, and preview zoom/guides in
+Chromium and Firefox. Chromium additionally synthesizes touch scrolling on the enlarged
+sheet. Screenshots and exported fixtures go to `/tmp/pdf-tools-interface-review`.
+Physical-device Safari and real-device touch remain manual checks. Use disposable server
+data; this script uploads fixtures and creates download jobs.
+
+Preview zoom is relative to the fitted sheet, not physical print size. Zoom and guide
+visibility are inspection-only state and never change layout requests or PDF exports.
 
 ## Shared DA components
 
