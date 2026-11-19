@@ -107,6 +107,9 @@ def run(page, base, directory):
         page.get_by_role('button', name='Download PDF').click()
     assert downloaded.value.path().read_bytes() == exports[0]
     assert not jobs and len(exports) == 1
+    # The browser download event can precede Elm's completion update. A
+    # programmatic click (unlike Playwright click) does not await actionability.
+    expect(send).to_be_enabled()
     send.evaluate('button => { button.click(); button.click(); }')
     expect(page.get_by_text('Sent to VersaWorks: queued.pdf')).to_be_visible()
     assert jobs == exports[1:] and len(jobs) == 1
