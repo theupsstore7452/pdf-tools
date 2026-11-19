@@ -39,6 +39,15 @@ init theme =
       , pending = []
       , nextId = 1
       , operation = PdfImage
+      , yardProof = emptyYardProof
+      , yardPreset = Just ( 24, 18 )
+      , yardWidth = "24"
+      , yardHeight = "18"
+      , yardMode = "fit"
+      , connector = NotChecked
+      , connectorToken = 0
+      , delivery = ""
+      , sending = False
       , preferredTool = Nothing
       , busy = False
       , phase = ""
@@ -222,6 +231,9 @@ intake : Bool -> List File.File -> Model -> ( Model, Cmd Msg )
 intake append files m =
     if m.busy || List.isEmpty files then
         ( m, Cmd.none )
+
+    else if m.operation == YardSign && (List.length files /= 1 || not (List.all isPdf files)) then
+        ( { m | error = "Choose one PDF for Yard Signs." }, Cmd.none )
 
     else if List.any (\f -> not (isPdf f || isImage f)) files then
         ( { m | error = "Choose PDF, PNG, or JPEG files." }, Cmd.none )
@@ -636,7 +648,127 @@ overrideFit m fit =
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
-update msg m =
+update msg before =
+    let
+        ( after, cmd ) =
+            updateWorkflow msg before
+
+        ( next, proofCmd ) =
+            syncYardProof msg before after
+    in
+    if before.operation /= YardSign && next.operation == YardSign then
+        let
+            ( checked, statusCmd ) =
+                checkConnector next
+        in
+        ( checked, Cmd.batch [ cmd, proofCmd, statusCmd ] )
+
+    else if next.operation /= YardSign then
+        ( { next | connector = NotChecked, connectorToken = before.connectorToken, delivery = "" }, Cmd.batch [ cmd, proofCmd ] )
+
+    else if next.delivery /= "" && (List.map .id next.files /= List.map .id before.files || yardDimensions next /= yardDimensions before || next.yardMode /= before.yardMode) then
+        ( { next | delivery = "" }, Cmd.batch [ cmd, proofCmd ] )
+
+    else
+        ( next, Cmd.batch [ cmd, proofCmd ] )
+
+
+connectorRequest : String -> String -> Http.Body -> Http.Expect Msg -> Float -> Cmd Msg
+connectorRequest method path body response timeout =
+    Http.request { method = method, url = "http://127.0.0.1:43127" ++ path, headers = [ Http.header "X-Pdf-Tools" "versaworks" ], body = body, expect = response, timeout = Just timeout, tracker = Nothing }
+
+
+checkConnector : Model -> ( Model, Cmd Msg )
+checkConnector m =
+    let
+        token =
+            m.connectorToken + 1
+    in
+    ( { m | connector = Checking, connectorToken = token }, connectorRequest "GET" "/status" Http.emptyBody (Http.expectJson (ConnectorStatus token) (D.field "available" D.bool)) 4000 )
+
+
+syncYardProof : Msg -> Model -> Model -> ( Model, Cmd Msg )
+syncYardProof msg before after =
+    let
+        file m =
+            if m.operation == YardSign then
+                List.head m.files
+
+            else
+                Nothing
+
+        old =
+            before.yardProof
+
+        proof =
+            after.yardProof
+
+        token =
+            old.token + 1
+
+        retry =
+            case msg of
+                RetryYardProof ->
+                    True
+
+                _ ->
+                    False
+    in
+    if Maybe.map .id (file before) /= Maybe.map .id (file after) || retry then
+        ( { after
+            | yardProof =
+                { emptyYardProof
+                    | session = token
+                    , token = token
+                    , page =
+                        if retry then
+                            old.page
+
+                        else
+                            1
+                }
+          }
+        , Cmd.batch
+            [ bridge "resetYardProof" []
+            , Maybe.map (\id -> delete ("gang-up/sources/" ++ id)) old.source |> Maybe.withDefault Cmd.none
+            , file after |> Maybe.map (\f -> request "POST" "api/yard-sign/sources" (Http.multipartBody [ Http.filePart "file" f.file ]) (jsonExpect (YardSource token) (D.field "sourceId" D.string)) Nothing) |> Maybe.withDefault Cmd.none
+            ]
+        )
+
+    else if after.operation == YardSign && (proof.source /= old.source || proof.page /= old.page || yardDimensions before /= yardDimensions after || before.yardMode /= after.yardMode) then
+        let
+            ( w, h ) =
+                yardDimensions after
+
+            render id =
+                bridge "yardPreview" [ ( "source", E.string id ), ( "pages", E.list E.int [ proof.page ] ), ( "token", E.int token ), ( "settings", E.object [ ( "width", E.string w ), ( "height", E.string h ), ( "mode", E.string after.yardMode ) ] ) ]
+        in
+        ( { after
+            | yardProof =
+                { proof
+                    | token = token
+                    , url = ""
+                    , error =
+                        if proof.source == Nothing then
+                            proof.error
+
+                        else
+                            ""
+                }
+          }
+        , if validYardSettings after then
+            Maybe.map render proof.source |> Maybe.withDefault Cmd.none
+
+          else
+            bridge "cancelPreview" []
+        )
+
+    else
+        ( after, Cmd.none )
+
+
+updateWorkflow : Msg -> Model -> ( Model, Cmd Msg )
+updateWorkflow msg m =
     let
         ( updated, updateCmd ) =
             updateInternal msg m
@@ -767,6 +899,9 @@ updateInternal msg m =
             if m.busy then
                 ( m, Cmd.none )
 
+            else if m.operation == YardSign then
+                ( m, File.Select.file [ "application/pdf" ] (\file -> Picked False file []) )
+
             else
                 ( m
                 , File.Select.files
@@ -794,7 +929,7 @@ updateInternal msg m =
             let
                 ( next, cmd ) =
                     if m.busy then
-                        update Cancel m
+                        updateWorkflow Cancel m
 
                     else
                         ( m, Cmd.none )
@@ -901,6 +1036,32 @@ updateInternal msg m =
                         in
                         ( next, Cmd.batch [ cmd, Reorderable.focus "organized-pages" change (\_ -> NoOp) ] )
 
+        RetryYardProof ->
+            ( m, Cmd.none )
+
+        YardPage page ->
+            let
+                proof =
+                    m.yardProof
+            in
+            ( { m | yardProof = { proof | page = clamp 1 (max 1 (O.count m)) page } }, Cmd.none )
+
+        YardSource session result ->
+            let
+                proof =
+                    m.yardProof
+            in
+            if m.operation /= YardSign || proof.session /= session then
+                ( m, Result.toMaybe result |> Maybe.map (\id -> delete ("gang-up/sources/" ++ id)) |> Maybe.withDefault Cmd.none )
+
+            else
+                case result of
+                    Ok id ->
+                        ( { m | yardProof = { proof | source = Just id } }, bridge "yardSource" [ ( "id", E.string id ) ] )
+
+                    Err err ->
+                        ( { m | yardProof = { proof | error = httpError err } }, Cmd.none )
+
         WorkspacePrepared epoch result ->
             case result of
                 Ok ( id, count ) ->
@@ -963,20 +1124,20 @@ updateInternal msg m =
             in
             case action of
                 "add" ->
-                    update (Browse True) next
+                    updateWorkflow (Browse True) next
 
                 "replace" ->
-                    update (Browse False) next
+                    updateWorkflow (Browse False) next
 
                 "pages" ->
-                    update OpenPages next
+                    updateWorkflow OpenPages next
 
                 "clear" ->
                     if m.busy then
                         ( next, Cmd.none )
 
                     else
-                        update (OpenDialog "clear") next
+                        updateWorkflow (OpenDialog "clear") next
 
                 _ ->
                     ( next, Cmd.none )
@@ -985,7 +1146,7 @@ updateInternal msg m =
             intake append (first :: rest) m
 
         Dropped files ->
-            intake (not (List.isEmpty m.files)) files m
+            intake (m.operation /= YardSign && not (List.isEmpty m.files)) files m
 
         Inspected epoch id result ->
             if epoch /= m.epoch then
@@ -1027,7 +1188,7 @@ updateInternal msg m =
                 ( m, Cmd.none )
 
             else if List.isEmpty files then
-                update Clear m
+                updateWorkflow Clear m
 
             else
                 commitFiles { m | pending = files, attempted = files }
@@ -1277,7 +1438,7 @@ updateInternal msg m =
                 ( fresh, _ ) =
                     init m.theme
             in
-            ( { fresh | epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1, presets = m.presets, recent = m.recent, nextToastId = m.nextToastId }
+            ( { fresh | yardProof = { emptyYardProof | token = m.yardProof.token }, epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1, presets = m.presets, recent = m.recent, nextToastId = m.nextToastId }
             , Cmd.batch
                 [ Http.cancel "inspection"
                 , Http.cancel "layout"
@@ -1293,11 +1454,15 @@ updateInternal msg m =
             )
 
         Cancel ->
-            ( { m | epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1, previewLoading = False, pageToken = m.pageToken + 1, pageLoading = False, busy = False, job = Nothing, phase = "", notice = "Cancelled. Your files and settings are retained." }, Cmd.batch [ Http.cancel "inspection", Http.cancel "job-upload", Http.cancel "layout", bridge "cancelPreview" [], Maybe.map (discardJob m.jobKind) m.job |> Maybe.withDefault Cmd.none ] )
+            if m.sending then
+                ( m, Cmd.none )
+
+            else
+                ( { m | epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1, previewLoading = False, pageToken = m.pageToken + 1, pageLoading = False, busy = False, job = Nothing, phase = "", notice = "Cancelled. Your files and settings are retained." }, Cmd.batch [ Http.cancel "inspection", Http.cancel "job-upload", Http.cancel "layout", bridge "cancelPreview" [], Maybe.map (discardJob m.jobKind) m.job |> Maybe.withDefault Cmd.none ] )
 
         Retry ->
             if m.retryKind == "rename" then
-                update (Save "rename-preset") m
+                updateWorkflow (Save "rename-preset") m
 
             else if String.startsWith "catalog:" m.retryKind then
                 ( { m | error = "", retryKind = "" }, catalog (String.dropLeft 8 m.retryKind) )
@@ -1320,7 +1485,7 @@ updateInternal msg m =
                 openPages { m | pageSource = Nothing }
 
             else if m.retryKind == "page-order" then
-                update ApplyPageOrder m
+                updateWorkflow ApplyPageOrder m
 
             else if m.retryKind == "prepare" then
                 prepare m
@@ -1340,6 +1505,72 @@ updateInternal msg m =
 
             else
                 preview m
+
+        CheckConnector ->
+            if m.operation == YardSign && m.connector /= Checking && not m.busy then
+                checkConnector m
+
+            else
+                ( m, Cmd.none )
+
+        ConnectorStatus token result ->
+            if m.operation /= YardSign || token /= m.connectorToken || m.connector /= Checking then
+                ( m, Cmd.none )
+
+            else
+                ( { m
+                    | connector =
+                        case result of
+                            Ok True ->
+                                Available
+
+                            Ok False ->
+                                Unavailable "VersaWorks input folder unavailable. Check the printer setup."
+
+                            Err _ ->
+                                Unavailable "Cannot confirm VersaWorks availability. Check that the local connector is running."
+                  }
+                , Cmd.none
+                )
+
+        SendYard ->
+            if canSendYard m then
+                submitTo VersaWorks m
+
+            else
+                ( m, Cmd.none )
+
+        YardSent epoch result ->
+            if epoch /= m.epoch || not m.sending then
+                ( m, Cmd.none )
+
+            else
+                case result of
+                    Ok filename ->
+                        ( { m | busy = False, sending = False, phase = "", delivery = "Sent to VersaWorks: " ++ filename }, Cmd.none )
+
+                    Err _ ->
+                        ( { m | busy = False, sending = False, phase = "", connector = Unavailable "Check the local connector.", delivery = "Delivery not confirmed. Check the VersaWorks queue before sending again." }, Cmd.none )
+
+        YardExported epoch destination name result ->
+            if epoch /= m.epoch || not m.busy || m.sending || m.operation /= YardSign then
+                ( m, Cmd.none )
+
+            else
+                case result of
+                    Err e ->
+                        if destination == VersaWorks then
+                            ( { m | busy = False, phase = "", delivery = "PDF export failed. Nothing was sent. " ++ httpError e }, Cmd.none )
+
+                        else
+                            ( { m | busy = False, phase = "", error = httpError e }, Cmd.none )
+
+                    Ok bytes ->
+                        if destination == VersaWorks then
+                            ( { m | sending = True, phase = "Sending to VersaWorks" }, connectorRequest "POST" "/jobs" (Http.bytesBody "application/pdf" bytes) (Http.expectJson (YardSent epoch) (D.field "filename" D.string)) 60000 )
+
+                        else
+                            ( { m | busy = False, phase = "", notice = name ++ " was sent to your browser." }, File.Download.bytes name "application/pdf" bytes )
 
         Submit ->
             submit m
@@ -1531,7 +1762,7 @@ updateInternal msg m =
             ( { m | previewGuides = not m.previewGuides }, Cmd.none )
 
         Lease _ ->
-            ( m, Cmd.batch ([ Maybe.map .sourceId m.source, m.pageSource ] |> List.filterMap identity |> List.map (\id -> request "PUT" ("gang-up/sources/" ++ id ++ "/lease") Http.emptyBody (expect (\_ -> NoOp) Ok) Nothing)) )
+            ( m, Cmd.batch ([ Maybe.map .sourceId m.source, m.pageSource, m.yardProof.source ] |> List.filterMap identity |> List.map (\id -> request "PUT" ("gang-up/sources/" ++ id ++ "/lease") Http.emptyBody (expect (\_ -> NoOp) Ok) Nothing)) )
 
         Catalog name result ->
             case result of
@@ -1717,6 +1948,27 @@ field key value m =
             Maybe.withDefault { flipEdge = A.DuplexFlipEdgeLongEdge, rotateBack180 = False, backAlignment = "" } r.duplex
     in
     case key of
+        "yard-size" ->
+            if value == "custom" then
+                ( { m | yardPreset = Nothing }, Cmd.none )
+
+            else
+                case List.filter (yardPresetKey >> (==) value) yardPresets of
+                    preset :: _ ->
+                        ( { m | yardPreset = Just preset }, Cmd.none )
+
+                    [] ->
+                        ( m, Cmd.none )
+
+        "yard-width" ->
+            ( { m | yardWidth = value }, Cmd.none )
+
+        "yard-height" ->
+            ( { m | yardHeight = value }, Cmd.none )
+
+        "yard-mode" ->
+            ( { m | yardMode = value }, Cmd.none )
+
         "target" ->
             ( { m | target = value }, Cmd.none )
 
@@ -1865,7 +2117,7 @@ field key value m =
             if value == "repeat" then
                 let
                     ( opened, dialogCommand ) =
-                        update (OpenDialog "quantities") changed
+                        updateWorkflow (OpenDialog "quantities") changed
                 in
                 ( opened, Cmd.batch [ command, dialogCommand ] )
 
@@ -2108,7 +2360,7 @@ applyDialog : Model -> ( Model, Cmd Msg )
 applyDialog m =
     case m.dialog of
         "clear" ->
-            update Clear m
+            updateWorkflow Clear m
 
         "range" ->
             let
@@ -2143,7 +2395,12 @@ applyDialog m =
 
 
 submit : Model -> ( Model, Cmd Msg )
-submit m =
+submit =
+    submitTo Download
+
+
+submitTo : YardDestination -> Model -> ( Model, Cmd Msg )
+submitTo destination m =
     if m.busy then
         ( m, Cmd.none )
 
@@ -2201,6 +2458,13 @@ submit m =
                                     []
                                )
 
+                    YardSign ->
+                        let
+                            ( w, h ) =
+                                yardDimensions m
+                        in
+                        [ ( "width", w ), ( "height", h ), ( "mode", m.yardMode ) ]
+
                     Merge ->
                         [ ( "action", "merge" ) ]
 
@@ -2212,7 +2476,7 @@ submit m =
 
             parts =
                 List.map (\( k, v ) -> Http.stringPart k v) fields
-                    ++ (if m.operation /= Impose then
+                    ++ (if m.operation /= Impose && m.operation /= YardSign then
                             pageOrderParts m
 
                         else
@@ -2231,6 +2495,49 @@ submit m =
         if List.isEmpty m.files || not rangeValid || not chunkValid || (m.operation == Impose && (not (validSetup m) || not m.layoutReady)) then
             ( { m | error = "Correct the highlighted settings before exporting." }, Cmd.none )
 
+        else if m.operation == YardSign then
+            case m.files of
+                [ selected ] ->
+                    if validYardSettings m && isPdf selected.file then
+                        let
+                            name =
+                                File.name selected.file
+
+                            stem =
+                                if String.endsWith ".pdf" (String.toLower name) then
+                                    String.dropRight 4 name
+
+                                else
+                                    name
+
+                            response =
+                                Http.expectBytesResponse (YardExported next.epoch destination (stem ++ "-yard-sign.pdf"))
+                                    (\res ->
+                                        case res of
+                                            Http.BadUrl_ url ->
+                                                Err (Http.BadUrl url)
+
+                                            Http.Timeout_ ->
+                                                Err Http.Timeout
+
+                                            Http.NetworkError_ ->
+                                                Err Http.NetworkError
+
+                                            Http.BadStatus_ meta _ ->
+                                                Err (Http.BadStatus meta.statusCode)
+
+                                            Http.GoodStatus_ _ bytes ->
+                                                Ok bytes
+                                    )
+                        in
+                        ( { next | delivery = "" }, request "POST" "api/yard-sign" (Http.multipartBody parts) response (Just "job-upload") )
+
+                    else
+                        ( { m | error = "Choose a PDF and correct the sign settings." }, Cmd.none )
+
+                _ ->
+                    ( { m | error = "Choose one PDF for Yard Signs." }, Cmd.none )
+
         else
             ( next, request "POST" "jobs" (Http.multipartBody parts) (expect (Created next.epoch "export") Ok) (Just "job-upload") )
 
@@ -2248,6 +2555,17 @@ browserEvent event m =
             get "token" D.int -1
     in
     case action of
+        "yardPreview" ->
+            let
+                proof =
+                    m.yardProof
+            in
+            if m.operation /= YardSign || get "source" D.string "" /= Maybe.withDefault "" proof.source || token /= proof.token then
+                ( m, Cmd.none )
+
+            else
+                ( { m | yardProof = { proof | url = get "url" D.string "", error = get "message" D.string "" } }, Cmd.none )
+
         "finishedSizeCommitted" ->
             ( { m | sizeInput = Nothing }, Cmd.none )
 
@@ -2310,7 +2628,7 @@ browserEvent event m =
                 ( m, Cmd.none )
 
         "visible" ->
-            update (Lease (Time.millisToPosix 0)) m
+            updateWorkflow (Lease (Time.millisToPosix 0)) m
 
         "crop" ->
             let
@@ -2506,7 +2824,7 @@ applyPageOrder m =
         ( m, Cmd.none )
 
     else if m.pageDraft == O.order m then
-        update ClosePages m
+        updateWorkflow ClosePages m
 
     else if m.operation /= Impose then
         ( { m | pageOrder = m.pageDraft, request = O.remapRequest (O.order m) m.pageDraft m.request, repeatSingle = [], repeatDouble = [], pageThumbnails = Dict.empty, pageOrganizer = False, pageLoading = False, pageToken = m.pageToken + 1, notice = "Page order updated for all tools." }, Cmd.batch [ bridge "clearPageThumbnails" [], bridge "focus" [ ( "id", E.string "organize-files" ) ] ] )

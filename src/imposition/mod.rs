@@ -16,6 +16,7 @@ mod recent_store;
 mod source_store;
 mod validation;
 
+pub(crate) use export::yard_sign::YardSign;
 pub(crate) use export::{
     export_clean_imposed_pdf, export_clean_imposed_pdf_path, flatten_annotations_for_export,
     flatten_annotations_path, resolve_request_source_path,

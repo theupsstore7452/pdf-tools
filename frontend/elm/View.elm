@@ -338,9 +338,9 @@ workspaceActions m =
         , themeToggle m
         , Menu.view []
             config
-            [ { id = "add", label = "Add " ++ fileLabel, disabled = m.busy || m.pageOrganizer, onSelect = WorkspaceAction "add" }
+            [ { id = "add", label = "Add " ++ fileLabel, disabled = m.operation == YardSign || m.busy || m.pageOrganizer, onSelect = WorkspaceAction "add" }
             , { id = "replace", label = "Replace " ++ fileLabel, disabled = m.busy || m.pageOrganizer, onSelect = WorkspaceAction "replace" }
-            , { id = "pages", label = "Organize pages", disabled = m.busy || m.pageOrganizer, onSelect = WorkspaceAction "pages" }
+            , { id = "pages", label = "Organize pages", disabled = m.operation == YardSign || m.busy || m.pageOrganizer, onSelect = WorkspaceAction "pages" }
             , { id = "clear", label = "Clear workspace", disabled = m.busy || m.pageOrganizer, onSelect = WorkspaceAction "clear" }
             ]
         ]
@@ -404,7 +404,7 @@ statusView m =
                       else
                         text ""
                     , Button.content []
-                        { variant = Button.Secondary, disabled = False, busy = False, className = "toast-action" }
+                        { variant = Button.Secondary, disabled = m.sending, busy = False, className = "toast-action" }
                         [ text
                             (if m.phase == "Checking PDFs" then
                                 "Cancel inspection"
@@ -483,6 +483,9 @@ emptyView m =
                 ImagePdf ->
                     "Turn PNG or JPEG images into a PDF."
 
+                YardSign ->
+                    "Size PDF artwork for a finished sign with bleed."
+
                 Impose ->
                     "Arrange artwork on print sheets with bleed and duplex options."
 
@@ -496,6 +499,9 @@ emptyView m =
 
                 Just PdfImage ->
                     "Choose one or more PDF files."
+
+                Just YardSign ->
+                    "Choose one PDF. Each page becomes a sign."
 
                 Just Split ->
                     "Choose one PDF, then select the pages to keep."
@@ -527,7 +533,7 @@ emptyView m =
                                 ]
                                 (ChooseTool op)
                         )
-                        [ PdfImage, Split, Merge, ImagePdf, Impose ]
+                        [ PdfImage, Split, Merge, ImagePdf, Impose, YardSign ]
                     )
                 ]
             , Card.view [ id "upload-card", attribute "aria-label" "Upload files" ]
@@ -535,6 +541,11 @@ emptyView m =
                     [ div [ class "empty-intro" ] [ h2 [] [ text (Maybe.map operationLabel m.preferredTool |> Maybe.withDefault "Drop your files here") ] ]
                     , Button.content [ id "browse-files", attribute "aria-describedby" "empty-state-description" ] { variant = Button.Primary, disabled = m.busy, busy = False, className = "primary-button" } [ text "Browse files" ] (Browse False)
                     , p [ id "empty-state-description", class "empty-formats" ] [ text formats ]
+                    , if m.preferredTool == Just YardSign then
+                        connectorPanel m
+
+                      else
+                        text ""
                     , if m.preferredTool /= Nothing then
                         p [ class "upload-drop-hint" ] [ text "Or drop your files anywhere on this page." ]
 
@@ -546,14 +557,89 @@ emptyView m =
         ]
 
 
+connectorPanel : Model -> Html Msg
+connectorPanel m =
+    let
+        status =
+            case m.connector of
+                Available ->
+                    "VersaWorks is available."
+
+                Checking ->
+                    "Checking for VersaWorks…"
+
+                Unavailable reason ->
+                    reason
+
+                NotChecked ->
+                    ""
+    in
+    div []
+        [ p [ class "field-help", attribute "role" "status" ] [ text status ]
+        , case m.connector of
+            Unavailable _ ->
+                Button.view [] { variant = Button.Secondary, disabled = m.busy, busy = False, className = "" } "Retry detection" CheckConnector
+
+            _ ->
+                text ""
+        , if List.isEmpty m.files then
+            text ""
+
+          else
+            Button.view [] { variant = Button.Secondary, disabled = not (canSendYard m), busy = False, className = "" } "Send to VersaWorks" SendYard
+        , p [ class "field-help", attribute "role" "status" ] [ text m.delivery ]
+        ]
+
+
+yardSizeSelector : Model -> Html Msg
+yardSizeSelector m =
+    let
+        optionFor (( w, h ) as size) =
+            ( yardPresetKey size
+            , String.fromInt w
+                ++ " × "
+                ++ String.fromInt h
+                ++ (if w < h then
+                        " portrait"
+
+                    else
+                        " landscape"
+                   )
+            )
+    in
+    DaField.select [] (DaField.config "yard-size" "Finished size (in)") { value = Maybe.map yardPresetKey m.yardPreset |> Maybe.withDefault "custom", onInput = Field "yard-size", options = fieldOptions (List.map optionFor yardPresets ++ [ ( "custom", "Custom" ) ]) }
+
+
+yardDimension : String -> String -> Html Msg
+yardDimension key draft =
+    let
+        config =
+            DaField.config ("yard-" ++ key) ("Finished " ++ key ++ " (in)")
+    in
+    DaField.input []
+        { config
+            | error =
+                if validYardDimension draft then
+                    Nothing
+
+                else
+                    Just "Enter a size greater than 0 and no more than 199.5 inches."
+        }
+        { value = draft, onInput = Field ("yard-" ++ key), kind = DaField.Decimal }
+
+
 queueView : Model -> Html Msg
 queueView m =
     section [ classList [ ( "file-queue", True ), ( "single-file", List.length m.files == 1 ) ], attribute "aria-label" "Selected files" ]
         [ div [ class "file-queue-head" ]
             [ div [ class "queue-heading" ] [ h2 [] [ text "Files" ], span [ class "count-badge" ] [ text (String.fromInt (List.length m.files)) ] ]
             , div [ class "file-queue-actions" ]
-                [ Button.view [ id "add-files" ] { variant = Button.Secondary, disabled = m.busy, busy = False, className = "" } "Add files" (Browse True)
-                , if m.operation /= Impose then
+                [ if m.operation == YardSign then
+                    Button.view [] { variant = Button.Secondary, disabled = m.busy, busy = False, className = "" } "Replace PDF" (Browse False)
+
+                  else
+                    Button.view [ id "add-files" ] { variant = Button.Secondary, disabled = m.busy, busy = False, className = "" } "Add files" (Browse True)
+                , if m.operation /= Impose && m.operation /= YardSign then
                     Button.view [ id "organize-files" ] { variant = Button.Quiet, disabled = m.busy, busy = False, className = "" } "Organize pages" OpenPages
 
                   else
@@ -665,6 +751,30 @@ genericView m =
 
         fields =
             case m.operation of
+                YardSign ->
+                    [ yardSizeSelector m ]
+                        ++ (if m.yardPreset == Nothing then
+                                [ yardDimension "width" m.yardWidth, yardDimension "height" m.yardHeight ]
+
+                            else
+                                []
+                           )
+                        ++ [ choices "Artwork scaling" "yard-mode" m.yardMode [ ( "fit", "Fit" ), ( "fill", "Fill" ), ( "stretch", "Stretch" ) ]
+                           , small [ class "field-help" ]
+                                [ text
+                                    (case m.yardMode of
+                                        "fill" ->
+                                            "Fill the sheet proportionally. Edges may be cropped."
+
+                                        "stretch" ->
+                                            "Stretch to the sheet. Artwork proportions may change."
+
+                                        _ ->
+                                            "Keep all artwork in proportion. Blank margins may remain."
+                                    )
+                                ]
+                           ]
+
                 PdfImage ->
                     [ pageChoices m
                     , choices "Image format" "target" m.target [ ( "png", "PNG" ), ( "jpeg", "JPEG" ) ]
@@ -732,12 +842,73 @@ genericView m =
                 _ ->
                     "Download PDF"
     in
-    div [ classList [ ( "workspace-grid ordered-files", True ), ( "file-action-workspace", List.member m.operation [ Merge, ImagePdf ] ) ] ]
+    div [ classList [ ( "workspace-grid ordered-files", True ), ( "yard-workspace", m.operation == YardSign ), ( "file-action-workspace", List.member m.operation [ Merge, ImagePdf ] ) ] ]
         [ queueView m
         , Html.form [ class "tool-form", attribute "aria-label" (Model.operationLabel m.operation ++ " settings"), onSubmit Submit ]
             [ fieldset [ class "tool-form-fields", disabled m.busy ] fields
             , p [ class "output-summary", attribute "role" "status", attribute "aria-atomic" "true" ] [ text (OutputSummary.generic m) ]
-            , div [ class "submit-row" ] [ Button.submitContent [] { variant = Button.Primary, disabled = m.busy || not validPages || not validChunk, busy = False, className = "primary-button" } [ text action ] ]
+            , div [ class "submit-row" ] [ Button.submitContent [] { variant = Button.Primary, disabled = m.busy || (m.operation == YardSign && not (validYardSettings m)) || not validPages || not validChunk, busy = False, className = "primary-button" } [ text action ] ]
+            , if m.operation == YardSign then
+                connectorPanel m
+
+              else
+                text ""
+            ]
+        , if m.operation == YardSign then
+            yardProofView m
+
+          else
+            text ""
+        ]
+
+
+yardProofView : Model -> Html Msg
+yardProofView m =
+    let
+        proof =
+            m.yardProof
+
+        count =
+            Organizer.count m
+
+        ( w, h ) =
+            yardDimensions m
+
+        full dimension =
+            String.toFloat dimension |> Maybe.withDefault 0 |> (+) 0.5 |> String.fromFloat
+
+        pageButton label page =
+            Button.content [] { variant = Button.Secondary, disabled = page < 1 || page > count, busy = False, className = "" } [ text label ] (YardPage page)
+
+        message value_ =
+            p [ attribute "role" "status" ] [ text value_ ]
+    in
+    section [ class "yard-proof", attribute "aria-label" "Sign proof" ]
+        [ div [ class "yard-proof-heading" ] [ h2 [] [ text "Sign proof" ], span [] [ text ("Page " ++ String.fromInt proof.page ++ " of " ++ String.fromInt count) ] ]
+        , div [ class "sheet-stage yard-proof-stage" ]
+            [ if not (validYardSettings m) then
+                message "Enter a valid finished size to see the proof."
+
+              else if proof.error /= "" then
+                div [ class "yard-proof-feedback" ] [ message ("Proof unavailable. " ++ proof.error), btn "Retry proof" RetryYardProof ]
+
+              else if proof.url == "" then
+                message "Rendering sign proof…"
+
+              else
+                Svg.svg [ SA.viewBox ("0 0 " ++ full w ++ " " ++ full h), attribute "role" "img", attribute "aria-label" ("Output proof, page " ++ String.fromInt proof.page) ]
+                    [ Svg.rect [ SA.width (full w), SA.height (full h), SA.fill "white" ] []
+                    , Svg.image [ SA.xlinkHref proof.url, SA.width (full w), SA.height (full h), SA.preserveAspectRatio "none" ] []
+                    , Svg.rect [ SA.class "yard-trim", SA.x "0.25", SA.y "0.25", SA.width w, SA.height h, SA.fill "none", attribute "vector-effect" "non-scaling-stroke" ] []
+                    ]
+            ]
+        , div [ class "yard-proof-footer" ]
+            [ small [] [ text "Dashed line: finished trim, ¼ in from each edge." ]
+            , if count > 1 then
+                div [ class "yard-proof-pages" ] [ pageButton "Previous page" (proof.page - 1), pageButton "Next page" (proof.page + 1) ]
+
+              else
+                text ""
             ]
         ]
 

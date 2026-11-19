@@ -1,3 +1,5 @@
+pub(super) mod yard_sign;
+
 use std::{collections::HashMap, fs::OpenOptions, path::Path};
 
 use lopdf::{

@@ -4748,7 +4748,7 @@ html:has(.elm-shell), body:has(.elm-shell), #app:has(.elm-shell) {
 #pdf-ui .elm-setup-actions { grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
 #pdf-ui .setup-back-button { grid-column: 1; gap: 6px; padding-inline: 10px; font-size: 14px; }
 #pdf-ui .setup-continue-button, #pdf-ui .setup-download-button {
-  grid-column: 2; justify-self: end; gap: 6px; min-height: 44px; padding-inline: 12px; font-size: 14px;
+  grid-column: 2; justify-self: end; gap: 6px; min-height: 60px; padding-inline: 12px; font-size: 14px;
 }
 #pdf-ui .setup-download-button { white-space: normal; }
 
@@ -4865,4 +4865,23 @@ html:has(.elm-shell), body:has(.elm-shell), #app:has(.elm-shell) {
 @media (max-width: 1100px) {
   #pdf-ui .preview-review-action { display: flex; flex: none; align-self: stretch; justify-content: center; margin: 10px 12px max(10px, env(safe-area-inset-bottom)); min-height: 44px; }
   #pdf-ui .elm-toolbar:not(:has(.sheet-nav-button)) .elm-preview-controls { align-self: center; }
+}
+
+/* Yard Signs keeps the export settings and the bleed-inclusive sheet in view. */
+#pdf-ui .yard-proof { min-width: 0; display: grid; gap: 12px; }
+#pdf-ui .yard-proof-heading, #pdf-ui .yard-proof-footer, #pdf-ui .yard-proof-pages {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+}
+#pdf-ui .yard-proof-heading h2 { margin: 0; font-size: 18px; }
+#pdf-ui .yard-proof-heading span, #pdf-ui .yard-proof-footer small { color: var(--text-muted); font-size: 13px; }
+#pdf-ui .yard-proof-heading span { font-variant-numeric: tabular-nums; }
+#pdf-ui .yard-proof-stage { height: clamp(240px, 48vh, 520px); border-radius: 8px; padding: 20px; }
+#pdf-ui .yard-proof-stage svg { width: 100%; height: 100%; min-height: 0; }
+#pdf-ui .yard-trim { stroke: #223d4a; stroke-width: 1px; stroke-dasharray: 5px 3px; filter: drop-shadow(0 1px 0 white); }
+#pdf-ui .yard-proof-feedback { text-align: center; overflow-wrap: anywhere; }
+@media (min-width: 800px) {
+  #pdf-ui .shell.generic-shell:has(.yard-workspace) { width: min(1180px, calc(100vw - 32px)); }
+  #pdf-ui .ready-card:not(.imposing) .workspace-grid.yard-workspace { grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.4fr); }
+  #pdf-ui .yard-workspace > .file-queue, #pdf-ui .yard-workspace > .tool-form { grid-column: 1; }
+  #pdf-ui .yard-workspace > .yard-proof { grid-column: 2; grid-row: 1 / span 2; }
 }

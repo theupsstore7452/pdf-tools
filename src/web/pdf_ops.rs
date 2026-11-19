@@ -45,6 +45,101 @@ pub(crate) async fn inspect(
     Ok(Json(serde_json::json!({ "pageCount": count })))
 }
 
+pub(crate) async fn yard_sign(
+    State(state): State<Arc<AppState>>,
+    multipart: Multipart,
+) -> AppResult<Response> {
+    let form = read_multipart(multipart).await?;
+    let sign = crate::imposition::YardSign::parse(
+        form.required_field("width")?,
+        form.required_field("height")?,
+        form.required_field("mode")?,
+    )?;
+    let file = require_one_pdf(form, "yard sign requires one PDF")?;
+    let filename = output_filename(&file.filename, OutputKind::YardSign);
+    let permit = state.admit_operation()?;
+    let pdfium = state.pdfium();
+    let file = state
+        .run_pdfium(permit.clone(), move || {
+            crate::imposition::flatten_annotations_for_export(&pdfium, file, None)
+        })
+        .await?;
+    let limit = state.max_download_bytes();
+    let bytes = state
+        .run_cpu(permit, move || sign.generate(&file.bytes, limit))
+        .await?;
+    Ok(pdf_response(&filename, bytes, limit)?.into_response())
+}
+
+/// Retain the same flattened input used by export, once per proof session.
+pub(crate) async fn yard_source(
+    State(state): State<Arc<AppState>>,
+    multipart: Multipart,
+) -> AppResult<Json<serde_json::Value>> {
+    let file = require_one_pdf(
+        read_multipart(multipart).await?,
+        "yard sign requires one PDF",
+    )?;
+    let permit = state.admit_operation()?;
+    let pdfium = state.pdfium();
+    let file = state
+        .run_pdfium(permit.clone(), move || {
+            crate::imposition::flatten_annotations_for_export(&pdfium, file, None)
+        })
+        .await?;
+    let store = state.source_session_store();
+    let id = state.run_cpu(permit, move || store.create(&file)).await?;
+    Ok(Json(serde_json::json!({"sourceId":id})))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct YardProofRequest {
+    page_numbers: [u32; 1],
+    width: String,
+    height: String,
+    mode: String,
+}
+
+pub(crate) async fn yard_preview(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(req): Json<YardProofRequest>,
+) -> AppResult<Response> {
+    let sign = crate::imposition::YardSign::parse(&req.width, &req.height, &req.mode)?;
+    let [page] = req.page_numbers;
+    let permit = state.admit_operation()?;
+    let store = state.source_session_store();
+    let limit = state.max_download_bytes();
+    let bytes = state
+        .run_cpu(permit.clone(), move || {
+            sign.generate_pages(&store.load(&id)?.bytes, limit, Some(page))
+        })
+        .await?;
+    let pdfium = state.pdfium();
+    let raster = state
+        .run_pdfium(permit.clone(), move || {
+            let doc = crate::documents::load_pdf(&pdfium, bytes.into())?;
+            crate::documents::raster_preview_page(&doc, 1, 1, false)
+        })
+        .await?;
+    let bytes = state
+        .run_cpu(permit, move || {
+            crate::documents::encode_preview_batch(vec![raster.with_page(page as usize)])
+        })
+        .await?;
+    crate::adapters::validate_download_size(bytes.len(), limit)?;
+    use axum::response::IntoResponse;
+    Ok((
+        [
+            ("content-type", "application/vnd.pdf-tools.preview-batch"),
+            ("cache-control", "no-store"),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
 pub(crate) async fn merge(
     State(state): State<Arc<AppState>>,
     multipart: Multipart,

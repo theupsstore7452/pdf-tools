@@ -24,7 +24,7 @@ pub(crate) use pdf_content_decode::decode_page_content_stream;
 pub(crate) use pdf_io::{estimated_lopdf_output_capacity, load_pdf, load_pdf_path, page_count};
 pub(crate) use pdf_merge::{merge_pdfs, merge_staged_pdfs};
 pub(crate) use pdf_render::{
-    encode_preview_batch, encode_preview_page, raster_page_thumbnails, raster_preview_pages,
-    render_pdf_files, zip_images, RasterFormat, RasterOptions, RenderLimits,
+    encode_preview_batch, encode_preview_page, raster_page_thumbnails, raster_preview_page,
+    raster_preview_pages, render_pdf_files, zip_images, RasterFormat, RasterOptions, RenderLimits,
 };
 pub(crate) use pdf_split::{extract_pdf_pages, ExtractOutputMode};

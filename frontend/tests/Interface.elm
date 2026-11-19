@@ -32,7 +32,7 @@ tests =
                 View.view initial
                     |> Query.fromHtml
                     |> Query.findAll [ Selector.class "home-tool-choice" ]
-                    |> Query.count (Expect.equal 5)
+                    |> Query.count (Expect.equal 6)
             )
         , test "Choosing a tool preserves intent for intake"
             (\_ ->

@@ -279,7 +279,6 @@ impl SourceSessionStore {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn load(&self, id: &str) -> AppResult<UploadFile> {
         let file = self.load_path(id)?;
         let bytes = match fs::read(&file.path) {

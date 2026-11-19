@@ -1,6 +1,7 @@
 module Model exposing (..)
 
 import Api.Generated as A
+import Bytes exposing (Bytes)
 import Da.Dropdown as Dropdown
 import Da.Reorderable as Reorderable
 import Dict exposing (Dict)
@@ -16,6 +17,19 @@ type Operation
     | Merge
     | ImagePdf
     | Impose
+    | YardSign
+
+
+type Connector
+    = NotChecked
+    | Checking
+    | Available
+    | Unavailable String
+
+
+type YardDestination
+    = Download
+    | VersaWorks
 
 
 type alias Selected =
@@ -30,12 +44,30 @@ type alias Toast =
     { id : Int, message : String, kind : String }
 
 
+type alias YardProof =
+    { session : Int, source : Maybe String, page : Int, token : Int, url : String, error : String }
+
+
+emptyYardProof : YardProof
+emptyYardProof =
+    { session = 0, source = Nothing, page = 1, token = 0, url = "", error = "" }
+
+
 type alias Model =
     { files : List Selected
     , attempted : List Selected
     , pending : List Selected
     , nextId : Int
     , operation : Operation
+    , yardProof : YardProof
+    , yardPreset : Maybe ( Int, Int )
+    , yardWidth : String
+    , yardHeight : String
+    , yardMode : String
+    , connector : Connector
+    , connectorToken : Int
+    , delivery : String
+    , sending : Bool
     , preferredTool : Maybe Operation
     , busy : Bool
     , phase : String
@@ -123,6 +155,9 @@ type Msg
     | PagePosition String
     | MovePage
     | PageOrderChanged Reorderable.Change
+    | YardSource Int (Result Http.Error String)
+    | YardPage Int
+    | RetryYardProof
     | WorkspacePrepared Int (Result Http.Error ( String, Int ))
     | OrderedSource Int (Result Http.Error A.PreparedSourceResponse)
     | WorkspaceDiscarded String (Result Http.Error String)
@@ -155,6 +190,11 @@ type Msg
     | Retry
     | RetryPreview
     | Submit
+    | CheckConnector
+    | ConnectorStatus Int (Result Http.Error Bool)
+    | SendYard
+    | YardSent Int (Result Http.Error String)
+    | YardExported Int YardDestination String (Result Http.Error Bytes)
     | Created Int String (Result Http.Error String)
     | Poll Int String
     | Polled Int String (Result Http.Error String)
@@ -192,6 +232,9 @@ operationLabel op =
         ImagePdf ->
             "Images to PDF"
 
+        YardSign ->
+            "Yard Signs"
+
         Impose ->
             "Impose artwork"
 
@@ -213,10 +256,54 @@ operations files =
             [ Merge, PdfImage, Impose ]
 
         else
-            [ PdfImage, Split, Impose ]
+            [ PdfImage, Split, Impose, YardSign ]
 
     else if List.all (.file >> isImage) files then
         [ ImagePdf, Impose ]
 
     else
         [ Impose ]
+
+
+validYardDimension : String -> Bool
+validYardDimension draft =
+    String.toFloat draft |> Maybe.map (\n -> n > 0 && n <= 199.5) |> Maybe.withDefault False
+
+
+yardPresets : List ( Int, Int )
+yardPresets =
+    [ ( 18, 24 ), ( 24, 18 ), ( 24, 36 ), ( 36, 24 ) ]
+
+
+yardPresetKey : ( Int, Int ) -> String
+yardPresetKey ( w, h ) =
+    String.fromInt w ++ "x" ++ String.fromInt h
+
+
+yardDimensions : Model -> ( String, String )
+yardDimensions m =
+    case m.yardPreset of
+        Just ( w, h ) ->
+            ( String.fromInt w, String.fromInt h )
+
+        Nothing ->
+            ( m.yardWidth, m.yardHeight )
+
+
+validYardSettings : Model -> Bool
+validYardSettings m =
+    let
+        ( w, h ) =
+            yardDimensions m
+    in
+    validYardDimension w && validYardDimension h && List.member m.yardMode [ "fit", "fill", "stretch" ]
+
+
+canSendYard : Model -> Bool
+canSendYard m =
+    case m.files of
+        [ selected ] ->
+            m.operation == YardSign && m.connector == Available && not m.busy && isPdf selected.file && validYardSettings m
+
+        _ ->
+            False

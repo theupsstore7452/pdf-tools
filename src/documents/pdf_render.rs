@@ -48,6 +48,13 @@ pub(crate) struct PreviewRaster {
     image: image::DynamicImage,
 }
 
+impl PreviewRaster {
+    pub(crate) fn with_page(mut self, number: usize) -> Self {
+        self.page = number;
+        self
+    }
+}
+
 pub(crate) fn raster_preview_pages(
     pdfium: &Pdfium,
     path: &Path,
@@ -123,7 +130,7 @@ fn ensure_preview_deadline(deadline: std::time::Instant) -> AppResult<()> {
     Ok(())
 }
 
-fn raster_preview_page(
+pub(crate) fn raster_preview_page(
     document: &PdfDocument<'_>,
     page_count: usize,
     page_number: usize,

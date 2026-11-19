@@ -105,6 +105,17 @@ generic m =
         ImagePdf ->
             plural (List.length m.files) "image" "images" ++ " → 1 PDF · one image per page at 300 DPI"
 
+        YardSign ->
+            if validYardSettings m then
+                let
+                    ( w, h ) =
+                        yardDimensions m
+                in
+                w ++ " × " ++ h ++ " in finished · ¼ in bleed on every edge · 1 PDF"
+
+            else
+                "Correct the sign settings before downloading."
+
         Impose ->
             imposed m
 

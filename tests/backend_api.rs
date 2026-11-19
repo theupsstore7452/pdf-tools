@@ -31,6 +31,8 @@ use zip::ZipArchive;
 mod finished_size;
 #[path = "support/page_organization.rs"]
 mod page_organization;
+#[path = "support/yard_sign.rs"]
+mod yard_sign;
 
 struct MultipartPart {
     name: String,

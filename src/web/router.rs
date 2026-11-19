@@ -115,6 +115,8 @@ pub fn app_with_frontend_dist(
     let multipart_routes = Router::new()
         .route("/pdf/inspect", post(super::pdf_ops::inspect))
         .route("/convert", post(super::convert::convert))
+        .route("/api/yard-sign/sources", post(super::pdf_ops::yard_source))
+        .route("/api/yard-sign", post(super::pdf_ops::yard_sign))
         .route("/merge", post(super::pdf_ops::merge))
         .route("/split", post(super::pdf_ops::split))
         .route("/gang-up/analyze", post(super::gang_up::analyze))
@@ -140,6 +142,10 @@ pub fn app_with_frontend_dist(
         ))
         .layer(DefaultBodyLimit::disable());
     let operation_routes = Router::new()
+        .route(
+            "/api/yard-sign/sources/{id}/previews",
+            post(super::pdf_ops::yard_preview).layer(DefaultBodyLimit::max(MAX_LAYOUT_JSON_BYTES)),
+        )
         .route(
             "/pdf/workspaces/{id}/previews",
             post(super::pages::thumbnails).layer(DefaultBodyLimit::max(MAX_LAYOUT_JSON_BYTES)),

@@ -3,6 +3,7 @@ const MAX_STEM_CHARS: usize = 96;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OutputKind {
     ImposedPdf,
+    YardSign,
     ExtractedPages,
     ExtractedCombinedPdf,
     ExtractedChunks,
@@ -14,6 +15,7 @@ pub(crate) enum OutputKind {
 pub(crate) fn output_filename(source_filename: &str, kind: OutputKind) -> String {
     let stem = source_stem(source_filename);
     match kind {
+        OutputKind::YardSign => format!("{stem}-yard-sign.pdf"),
         OutputKind::ImposedPdf => format!("{stem}-imposed.pdf"),
         OutputKind::ExtractedPages => format!("{stem}-pages.zip"),
         OutputKind::ExtractedCombinedPdf => format!("{stem}-pages.pdf"),

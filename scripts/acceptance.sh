@@ -17,3 +17,4 @@ if [ -n "${PDF_TOOLS_ACCEPTANCE_CHECKS:-}" ]; then browser_options+=(--checks "$
 python3 scripts/elm-browser-acceptance.py --url "http://127.0.0.1:$acceptance_port" --output "${PDF_TOOLS_ACCEPTANCE_OUTPUT:-/tmp/pdf-elm-acceptance}" "${browser_options[@]}"
 python3 scripts/workflow-regressions.py --url "http://127.0.0.1:$acceptance_port" --output "${PDF_TOOLS_ACCEPTANCE_OUTPUT:-/tmp/pdf-elm-acceptance}/workflows"
 python3 scripts/elm-http-acceptance.py --port "$acceptance_port"
+python3 scripts/yard-proof-regressions.py --base "http://127.0.0.1:$acceptance_port"

@@ -1,5 +1,5 @@
 /* Browser-owned resources only. Workflow decisions, validation, forms, HTTP
-   jobs, and production geometry belong to Elm/Rust. No secure-context APIs. */
+   jobs, and production geometry belong to Elm/Rust. */
 import { install } from './da-components.js';
 
 export function connect(app) {
@@ -170,13 +170,13 @@ export function connect(app) {
     const timer = setTimeout(resolve, ms);
     signal.addEventListener('abort', () => { clearTimeout(timer); reject(new DOMException('Cancelled', 'AbortError')); }, {once:true});
   });
-  async function batch(source, pages, bleed, signal, namespace = 'gang-up/sources') {
+  async function batch(source, pages, bleed, signal, namespace = 'gang-up/sources', settings) {
     let failure;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const response = await fetch(`${namespace}/${encodeURIComponent(source)}/previews`, {
           method:'POST', headers:{'Content-Type':'application/json'}, signal,
-          body:JSON.stringify(namespace === 'pdf/workspaces' ? {pageNumbers:pages} : {pageNumbers:pages, sourceBleedOverride:bleed})
+          body:JSON.stringify({pageNumbers:pages, sourceBleedOverride:bleed, ...settings})
         });
         if (!response.ok) {
           const message = await response.text();
@@ -208,7 +208,7 @@ export function connect(app) {
     }
     throw failure;
   }
-  let pageController, pageWorkspaceSource;
+  let yardSource, pageController, pageWorkspaceSource;
   const pageCache = new Map();
   const clearPageThumbnails = () => {
     pageController?.abort();
@@ -243,12 +243,15 @@ export function connect(app) {
     const controller = new AbortController();
     previewController = controller;
     const {token, source, pages, bleed} = command;
-    const keyFor = page => `${source}:${bleed ?? 'default'}:${page}`;
+    const yard = command.action === 'yardPreview';
+    const variant = yard ? JSON.stringify(command.settings) : bleed;
+    const keyFor = page => `${source}:${variant ?? 'default'}:${page}`;
     try {
       const missing = pages.filter(page => !cache.has(keyFor(page)));
+      if (yard && missing.length) await delay(150, controller.signal);
       // One scheduler per workspace, one request in flight, four pages maximum.
       for (let i = 0; i < missing.length; i += 4) {
-        const assets = await batch(source, missing.slice(i,i+4), bleed, controller.signal);
+        const assets = await batch(source, missing.slice(i,i+4), bleed, controller.signal, yard ? 'api/yard-sign/sources' : undefined, command.settings);
         if (controller.signal.aborted) return;
         for (const {page,png} of assets) {
           const key = keyFor(page), asset = {url:URL.createObjectURL(new Blob([png], {type:'image/png'})), bytes:png.length};
@@ -259,9 +262,13 @@ export function connect(app) {
       if (controller.signal.aborted) return;
       const urls = pages.map(page => ({page, url:cache.get(keyFor(page)).url}));
       for (const page of pages) { const key = keyFor(page), asset = cache.get(key); cache.delete(key); cache.set(key,asset); }
-      send({action:'preview',token,urls});
+      if (yard) {
+        protectedUrls = new Set([urls[0].url]);
+        evict();
+        send({action:'yardPreview',source,token,url:urls[0].url});
+      } else send({action:'preview',token,urls});
     } catch(error) {
-      if (!controller.signal.aborted) send({action:'previewError',token,message:error.message});
+      if (!controller.signal.aborted) send({action:yard ? 'yardPreview' : 'previewError',source,token,message:error.message});
       evict();
     }
   }
@@ -301,6 +308,9 @@ export function connect(app) {
       case 'identity': identity = command.token; downloadController?.abort(); break;
       case 'pageThumbnails': void pageThumbnails(command); break;
       case 'clearPageThumbnails': clearPageThumbnails(); break;
+      case 'yardSource': yardSource = command.id; break;
+      case 'resetYardProof': clear(); yardSource = undefined; break;
+      case 'yardPreview':
       case 'preview': void preview(command); break;
       case 'cancelPreview': previewController?.abort(); break;
       case 'commitPreview':
@@ -353,6 +363,7 @@ export function connect(app) {
   document.addEventListener('pointercancel',() => { drag = undefined; });
   window.addEventListener('pagehide',() => {
     clearPageThumbnails();
+    if (yardSource) void fetch(`gang-up/sources/${encodeURIComponent(yardSource)}`,{method:'DELETE',keepalive:true});
     if (pageWorkspaceSource) void fetch(`gang-up/sources/${encodeURIComponent(pageWorkspaceSource)}`,{method:'DELETE',keepalive:true});
     downloadController?.abort();
     clear();
